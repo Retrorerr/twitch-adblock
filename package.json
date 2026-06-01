@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Minimal uBlock Origin resource for Twitch video ad filtering.",
+  "license": "MIT",
   "scripts": {
     "build": "node scripts/build.js",
     "check": "node --check scripts/build.js && node scripts/build.js"

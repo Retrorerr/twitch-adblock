@@ -34,4 +34,6 @@ npm run check
 
 ## Notes
 
+Based on `vaft` from [pixeltris/TwitchAdSolutions](https://github.com/pixeltris/TwitchAdSolutions), licensed under MIT.
+
 Use one Twitch video ad scriptlet at a time. Multiple overlapping Twitch adblockers can conflict with playback.
