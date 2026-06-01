@@ -4,19 +4,36 @@ A minimal uBlock Origin resource for Twitch video ad filtering.
 
 ## Install
 
-Add the resource URL to uBlock Origin's advanced setting `userResourcesLocation`:
+1. Open the uBlock Origin dashboard.
+   - Click the uBlock Origin icon.
+   - Click the gear icon to open the dashboard.
+
+2. Enable advanced settings.
+   - Go to the **Settings** tab.
+   - Check **I am an advanced user**.
+   - Click the small gear icon that appears next to it.
+
+3. Add the custom script resource.
+   - Find `userResourcesLocation`.
+   - Replace `unset` with this URL:
 
 ```text
 https://raw.githubusercontent.com/Retrorerr/twitch-adblock/main/dist/vaft-ublock-origin.js
 ```
 
-Then add the scriptlet filter:
+If `userResourcesLocation` already has something in it, add a space after the existing value and paste the URL after it.
+
+4. Add the Twitch filter.
+   - Go to the **My filters** tab.
+   - Add this line:
 
 ```text
 twitch.tv##+js(twitch-videoad)
 ```
 
-Reload uBlock Origin after changing custom resources.
+5. Apply the changes.
+   - Click **Apply changes**.
+   - Restart the browser, or reload uBlock Origin from the browser extensions page.
 
 ## Files
 
