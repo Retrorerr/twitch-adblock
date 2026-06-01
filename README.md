@@ -1,57 +1,37 @@
-# Twitch VAFT uBlock Resource
+# twitch-adblock
 
-Personal uBlock Origin resource packaging for a VAFT-style Twitch script.
+A minimal uBlock Origin resource for Twitch video ad filtering.
 
-This repository is intentionally small: put your script in `src/vaft.js`, run the build command, and point uBlock Origin at the generated raw `dist/vaft-ublock-origin.js` file.
+## Install
 
-## Files
+Add the resource URL to uBlock Origin's advanced setting `userResourcesLocation`:
 
-- `src/vaft.js` - your editable source script. This can be plain JavaScript or a full uBlock Origin resource beginning with `twitch-videoad.js text/javascript`.
-- `dist/vaft-ublock-origin.js` - generated uBlock Origin resource.
-- `dist/vaft.user.js` - generated userscript variant for userscript managers.
-- `scripts/build.js` - no-dependency build script.
-
-## Build
-
-```powershell
-npm run build
+```text
+https://raw.githubusercontent.com/Retrorerr/twitch-adblock/main/dist/vaft-ublock-origin.js
 ```
 
-## uBlock Origin Setup
-
-1. Open the uBlock Origin dashboard.
-2. Go to **My filters** and add:
+Then add the scriptlet filter:
 
 ```text
 twitch.tv##+js(twitch-videoad)
 ```
 
-3. Go to **Settings**, enable **I am an advanced user**, then open the advanced settings cog.
-4. Set `userResourcesLocation` to the raw GitHub URL for `dist/vaft-ublock-origin.js`.
+Reload uBlock Origin after changing custom resources.
 
-Example after pushing this repository to GitHub:
+## Files
 
-```text
-userResourcesLocation https://raw.githubusercontent.com/<your-user>/<your-repo>/main/dist/vaft-ublock-origin.js
-```
+- `src/vaft.js` - source resource.
+- `dist/vaft-ublock-origin.js` - uBlock Origin resource.
+- `dist/vaft.user.js` - userscript build.
+- `scripts/build.js` - build script.
 
-If you already have a `userResourcesLocation`, append this URL after a space.
+## Development
 
-For a fixed, non-auto-updating version, use a commit permalink instead of the `main` branch URL.
-
-## Updating
-
-After editing `src/vaft.js`:
-
-```powershell
+```sh
 npm run build
-git add src/vaft.js dist/vaft-ublock-origin.js dist/vaft.user.js
-git commit -m "Update VAFT script"
-git push
+npm run check
 ```
-
-Then reload uBlock Origin or restart the browser so the updated resource is picked up.
 
 ## Notes
 
-Do not combine multiple Twitch-specific adblock scriptlets at the same time. If playback becomes flaky, disable other Twitch adblockers first so you can isolate the cause.
+Use one Twitch video ad scriptlet at a time. Multiple overlapping Twitch adblockers can conflict with playback.
