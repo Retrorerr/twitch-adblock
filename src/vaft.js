@@ -9,7 +9,7 @@ twitch-videoad.js text/javascript
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
-    const twitchAdblockVersion = '0.1.2';
+    const twitchAdblockVersion = '0.1.3';
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -383,26 +383,57 @@ twitch-videoad.js text/javascript
         }
         return newServerTime ? encodingsM3u8.replace(new RegExp('(SERVER-TIME=")[0-9.]+"'), `SERVER-TIME="${newServerTime}"`) : encodingsM3u8;
     }
+    function hasAdMarkers(textStr) {
+        const lowerText = textStr.toLowerCase();
+        return textStr.includes(AdSignifier)
+            || textStr.includes('X-TV-TWITCH-AD-')
+            || lowerText.includes('twitch-ad')
+            || lowerText.includes('"midroll"')
+            || lowerText.includes('"preroll"');
+    }
+    function isAdMarkerLine(line) {
+        const lowerLine = line.toLowerCase();
+        return line.includes(AdSignifier)
+            || line.includes('X-TV-TWITCH-AD-')
+            || lowerLine.includes('twitch-ad')
+            || lowerLine.includes('"midroll"')
+            || lowerLine.includes('"preroll"');
+    }
+    function isSegmentUrlLine(line) {
+        const trimmed = line.trim();
+        return trimmed.length > 0 && !trimmed.startsWith('#');
+    }
+    function cacheAdSegment(segmentUrl, streamInfo) {
+        if (!AdSegmentCache.has(segmentUrl)) {
+            streamInfo.NumStrippedAdSegments++;
+        }
+        AdSegmentCache.set(segmentUrl, Date.now());
+    }
     function stripAdSegments(textStr, stripAllSegments, streamInfo) {
         let hasStrippedAdSegments = false;
+        let stripNextSegment = false;
         const lines = textStr.replaceAll('\r', '').split('\n');
         const newAdUrl = 'https://twitch.tv';
         for (let i = 0; i < lines.length; i++) {
             let line = lines[i];
+            if (isAdMarkerLine(line)) {
+                hasStrippedAdSegments = true;
+                stripNextSegment = true;
+            }
             // Remove tracking urls which appear in the overlay UI
             line = line
                 .replaceAll(/(X-TV-TWITCH-AD-URL=")(?:[^"]*)(")/g, `$1${newAdUrl}$2`)
                 .replaceAll(/(X-TV-TWITCH-AD-CLICK-TRACKING-URL=")(?:[^"]*)(")/g, `$1${newAdUrl}$2`);
-            if (i < lines.length - 1 && line.startsWith('#EXTINF') && (!line.includes(',live') || stripAllSegments || AllSegmentsAreAdSegments)) {
+            lines[i] = line;
+            if (i < lines.length - 1 && line.startsWith('#EXTINF') && (!line.includes(',live') || stripAllSegments || AllSegmentsAreAdSegments || stripNextSegment)) {
                 const segmentUrl = lines[i + 1];
-                if (!AdSegmentCache.has(segmentUrl)) {
-                    streamInfo.NumStrippedAdSegments++;
-                }
-                AdSegmentCache.set(segmentUrl, Date.now());
+                cacheAdSegment(segmentUrl, streamInfo);
                 hasStrippedAdSegments = true;
-            }
-            if (line.includes(AdSignifier)) {
+                stripNextSegment = false;
+            } else if (stripNextSegment && isSegmentUrlLine(line)) {
+                cacheAdSegment(line, streamInfo);
                 hasStrippedAdSegments = true;
+                stripNextSegment = false;
             }
         }
         if (hasStrippedAdSegments) {
@@ -463,9 +494,9 @@ twitch-videoad.js text/javascript
             HasTriggeredPlayerReload = false;
             streamInfo.LastPlayerReload = Date.now();
         }
-        const haveAdTags = textStr.includes(AdSignifier) || SimulatedAdsDepth > 0;
+        const haveAdTags = hasAdMarkers(textStr) || SimulatedAdsDepth > 0;
         if (haveAdTags) {
-            streamInfo.IsMidroll = textStr.includes('"MIDROLL"') || textStr.includes('"midroll"');
+            streamInfo.IsMidroll = textStr.toLowerCase().includes('midroll');
             if (!streamInfo.IsShowingAd) {
                 streamInfo.IsShowingAd = true;
                 postMessage({
@@ -547,7 +578,7 @@ twitch-videoad.js text/javascript
                                     if (playerType == FallbackPlayerType) {
                                         fallbackM3u8 = m3u8Text;
                                     }
-                                    if ((!m3u8Text.includes(AdSignifier) && (SimulatedAdsDepth == 0 || playerTypeIndex >= SimulatedAdsDepth - 1)) || (!fallbackM3u8 && playerTypeIndex >= BackupPlayerTypes.length - 1)) {
+                                    if ((!hasAdMarkers(m3u8Text) && (SimulatedAdsDepth == 0 || playerTypeIndex >= SimulatedAdsDepth - 1)) || (!fallbackM3u8 && playerTypeIndex >= BackupPlayerTypes.length - 1)) {
                                         backupPlayerType = playerType;
                                         backupM3u8 = m3u8Text;
                                         break;
