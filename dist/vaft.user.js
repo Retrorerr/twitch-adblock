@@ -19,6 +19,7 @@
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
+    const twitchAdblockVersion = '0.1.1';
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -797,7 +798,7 @@
             }
             if (adBlockDiv != null) {
                 isActivelyStrippingAds = data.isStrippingAdSegments;
-                const overlayText = 'Blocking' + (data.isMidroll ? ' midroll' : '') + ' ads' + (data.isStrippingAdSegments ? ' (stripping)' : '');// + (data.numStrippedAdSegments > 0 ? ` (${data.numStrippedAdSegments})` : '');
+                const overlayText = 'Blocking' + (data.isMidroll ? ' midroll' : '') + ' ads' + (data.isStrippingAdSegments ? ' (stripping)' : '') + ` v${twitchAdblockVersion}`;// + (data.numStrippedAdSegments > 0 ? ` (${data.numStrippedAdSegments})` : '');
                 const overlayDisplay = data.hasAds && playerBufferState.isLive ? 'block' : 'none';
                 if (lastAdblockOverlayText !== overlayText) {
                     adBlockDiv.P.textContent = overlayText;
