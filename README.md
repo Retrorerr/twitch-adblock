@@ -18,10 +18,10 @@ A minimal uBlock Origin resource for Twitch video ad filtering.
    - Replace `unset` with this URL:
 
 ```text
-https://raw.githubusercontent.com/Retrorerr/twitch-adblock/main/dist/vaft-ublock-origin.js?v=0.1.1
+https://raw.githubusercontent.com/Retrorerr/twitch-adblock/main/dist/vaft-ublock-origin.js?v=0.1.2
 ```
 
-The `?v=0.1.1` part helps uBlock Origin fetch the current version instead of using an older cached copy.
+The `?v=0.1.2` part helps uBlock Origin fetch the current version instead of using an older cached copy.
 
 If `userResourcesLocation` already has something in it, add a space after the existing value and paste the URL after it.
 

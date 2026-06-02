@@ -1,6 +1,6 @@
 {
   "name": "twitch-adblock",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Minimal uBlock Origin resource for Twitch video ad filtering.",
   "license": "MIT",

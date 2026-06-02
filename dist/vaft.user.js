@@ -19,23 +19,23 @@
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
-    const twitchAdblockVersion = '0.1.1';
+    const twitchAdblockVersion = '0.1.2';
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
         scope.BackupPlayerTypes = [
-            'embed',//Source
-            'popout',//Source fallback
-            'autoplay',//360p fallback
+            'embed',//Source. Fast first choice.
+            'autoplay',//Lower-quality fallback, but cheap and reliable.
+            //'popout',//Disabled for smoother ad transitions: extra fallback probing can cause long stalls.
             //'picture-by-picture-CACHED'//360p (-CACHED is an internal suffix and is removed)
         ];
         scope.FallbackPlayerType = 'embed';
         scope.ForceAccessTokenPlayerType = 'popout';
-        scope.SkipPlayerReloadOnHevc = false;// Allows recovery reloads on HEVC streams. Set true if 1440p/4K causes #4000 / #3000 errors in Chromium.
+        scope.SkipPlayerReloadOnHevc = true;// Smoother mode: avoid codec-triggered player reloads. If 1440p/4K errors occur in Chromium/Brave, set this back to false.
         scope.AlwaysReloadPlayerOnAd = false;// Always pause/play when entering/leaving ads
-        scope.ReloadPlayerAfterAd = true;// After the ad finishes do a player reload instead of pause/play
-        scope.PlayerReloadMinimalRequestsTime = 1500;
-        scope.PlayerReloadMinimalRequestsPlayerIndex = 2;//autoplay
+        scope.ReloadPlayerAfterAd = false;// Smoother mode: avoid full player reloads after ads.
+        scope.PlayerReloadMinimalRequestsTime = 5000;
+        scope.PlayerReloadMinimalRequestsPlayerIndex = 1;//autoplay; matches the trimmed BackupPlayerTypes list.
         scope.HasTriggeredPlayerReload = false;
         scope.StreamInfos = [];
         scope.StreamInfosByUrl = [];
