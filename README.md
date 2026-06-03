@@ -27,6 +27,8 @@ If `userResourcesLocation` already has something in it, add a space after the ex
 
 4. Add the Twitch filter.
    - Go to the **My filters** tab.
+   - Make sure **Enable my custom filters** is checked.
+   - If **Trust my filters** is shown, check it. If it is not shown, make sure the advanced setting `trustedListPrefixes` contains `user-`, for example `ublock- user-`.
    - Add this line:
 
 ```text
@@ -35,6 +37,7 @@ twitch.tv##+js(twitch-videoad)
 
 5. Apply the changes.
    - Click **Apply changes**.
+   - If this is a new install or version change, go to **Filter lists**, purge/update the `uBlock filters` cache, then click **Update now**.
    - Restart the browser, or disable and re-enable uBlock Origin from the browser extensions page.
 
 The filter name intentionally omits `.js`: `twitch-videoad` maps to the `twitch-videoad.js` resource inside `vaft-ublock-origin.js`.
@@ -68,7 +71,7 @@ window.twitchAdblockSelfTest
 ```
 
 If that is undefined, uBlock Origin has not loaded or applied the custom resource file.
-Recheck the resource URL, click **Apply changes** in uBlock Origin, and restart the browser or disable and re-enable uBlock Origin.
+Recheck the resource URL, **Enable my custom filters**, **Trust my filters**, click **Apply changes**, update the `uBlock filters` cache, and restart the browser or disable and re-enable uBlock Origin.
 
 Remove the self-test filter after this check:
 
