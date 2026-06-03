@@ -9,7 +9,9 @@ twitch-videoad.js text/javascript
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
-    const twitchAdblockVersion = '0.1.3';
+    const twitchAdblockVersion = '0.1.4';
+    const twitchAdblockDebugKey = 'twitch-adblock-debug';
+    const twitchAdblockDebugLimit = 200;
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -48,12 +50,66 @@ twitch-videoad.js text/javascript
         scope.PauseResumePlayerAfterAd = false;// Smoother mode: do not force pause/play after an ad unless you need it to recover stuck playback.
         scope.AdSegmentCache = new Map();
         scope.AllSegmentsAreAdSegments = false;
+        scope.DebugEnabled = false;
     }
     let isActivelyStrippingAds = false;
     let localStorageHookFailed = false;
     let lastAdblockOverlayText = null;
     let lastAdblockOverlayDisplay = null;
     const twitchWorkers = [];
+    function isTwitchAdblockDebugEnabled() {
+        try {
+            return localStorage.getItem(twitchAdblockDebugKey) === '1' || window.__twitchAdblockDebugEnabled === true;
+        } catch {
+            return window.__twitchAdblockDebugEnabled === true;
+        }
+    }
+    function setTwitchAdblockDebugEnabled(value) {
+        const isEnabled = value === true;
+        window.__twitchAdblockDebugEnabled = isEnabled;
+        try {
+            localStorage.setItem(twitchAdblockDebugKey, isEnabled ? '1' : '0');
+        } catch {}
+        twitchWorkers.forEach((worker) => worker.postMessage({
+            key: 'SetDebugEnabled',
+            value: isEnabled
+        }));
+        recordTwitchAdblockDebug('page', 'debug-toggle', { enabled: isEnabled });
+        return isEnabled;
+    }
+    function recordTwitchAdblockDebug(source, event, data) {
+        const entry = {
+            at: new Date().toISOString(),
+            version: twitchAdblockVersion,
+            source,
+            event,
+            data: data || null
+        };
+        const entries = window.__twitchAdblockDebugEvents = window.__twitchAdblockDebugEvents || [];
+        entries.push(entry);
+        while (entries.length > twitchAdblockDebugLimit) {
+            entries.shift();
+        }
+        if (isTwitchAdblockDebugEnabled()) {
+            console.log('[twitch-adblock]', event, entry.data);
+        }
+        return entry;
+    }
+    function installTwitchAdblockDebugHelpers() {
+        window.twitchAdblockDebug = {
+            version: twitchAdblockVersion,
+            enable: () => setTwitchAdblockDebugEnabled(true),
+            disable: () => setTwitchAdblockDebugEnabled(false),
+            clear: () => {
+                window.__twitchAdblockDebugEvents = [];
+                return [];
+            },
+            dump: () => window.__twitchAdblockDebugEvents || []
+        };
+        if (isTwitchAdblockDebugEnabled()) {
+            recordTwitchAdblockDebug('page', 'page-start', { href: location.href });
+        }
+    }
     const workerStringConflicts = [
         'twitch',
         'isVariantA'// TwitchNoSub
@@ -125,6 +181,14 @@ twitch-videoad.js text/javascript
                 }
                 const newBlobStr = `
                     const pendingFetchRequests = new Map();
+                    const twitchAdblockVersion = '${twitchAdblockVersion}';
+                    ${debugLog.toString()}
+                    ${summarizeUrl.toString()}
+                    ${hasAdMarkers.toString()}
+                    ${isAdMarkerLine.toString()}
+                    ${isSegmentUrlLine.toString()}
+                    ${cacheAdSegment.toString()}
+                    ${getAdMarkerSummary.toString()}
                     ${stripAdSegments.toString()}
                     ${getStreamUrlForResolution.toString()}
                     ${processM3U8.toString()}
@@ -138,11 +202,13 @@ twitch-videoad.js text/javascript
                     ${replaceServerTimeInM3u8.toString()}
                     const workerString = getWasmWorkerJs('${twitchBlobUrl.replaceAll("'", "%27")}');
                     declareOptions(self);
+                    DebugEnabled = ${isTwitchAdblockDebugEnabled() ? 'true' : 'false'};
                     GQLDeviceID = ${GQLDeviceID ? "'" + GQLDeviceID + "'" : null};
                     AuthorizationHeader = ${AuthorizationHeader ? "'" + AuthorizationHeader + "'" : undefined};
                     ClientIntegrityHeader = ${ClientIntegrityHeader ? "'" + ClientIntegrityHeader + "'" : null};
                     ClientVersion = ${ClientVersion ? "'" + ClientVersion + "'" : null};
                     ClientSession = ${ClientSession ? "'" + ClientSession + "'" : null};
+                    debugLog('worker-start', { version: twitchAdblockVersion });
                     self.addEventListener('message', function(e) {
                         if (e.data.key == 'UpdateClientVersion') {
                             ClientVersion = e.data.value;
@@ -181,6 +247,9 @@ twitch-videoad.js text/javascript
                         } else if (e.data.key == 'AllSegmentsAreAdSegments') {
                             AllSegmentsAreAdSegments = !AllSegmentsAreAdSegments;
                             console.log('AllSegmentsAreAdSegments: ' + AllSegmentsAreAdSegments);
+                        } else if (e.data.key == 'SetDebugEnabled') {
+                            DebugEnabled = e.data.value === true;
+                            debugLog('debug-state', { enabled: DebugEnabled });
                         }
                     });
                     hookWorkerFetch();
@@ -195,6 +264,8 @@ twitch-videoad.js text/javascript
                         doTwitchPlayerTask(true, false);
                     } else if (e.data.key == 'ReloadPlayer') {
                         doTwitchPlayerTask(false, true);
+                    } else if (e.data.key == 'DebugLog') {
+                        recordTwitchAdblockDebug('worker', e.data.event, e.data.data);
                     }
                 });
                 this.addEventListener('message', async event => {
@@ -236,6 +307,10 @@ twitch-videoad.js text/javascript
         fetch = async function(url, options) {
             if (typeof url === 'string') {
                 if (AdSegmentCache.has(url)) {
+                    debugLog('segment-cache-hit', {
+                        url: summarizeUrl(url),
+                        cachedSegments: AdSegmentCache.size
+                    });
                     return new Promise(function(resolve, reject) {
                         const send = function() {
                             return realFetch('data:video/mp4;base64,AAAAKGZ0eXBtcDQyAAAAAWlzb21tcDQyZGFzaGF2YzFpc282aGxzZgAABEltb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAYagAAAAAAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAABqHRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAURtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAALuAAAAAAFXEAAAAAAAtaGRscgAAAAAAAAAAc291bgAAAAAAAAAAAAAAAFNvdW5kSGFuZGxlcgAAAADvbWluZgAAABBzbWhkAAAAAAAAAAAAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAACzc3RibAAAAGdzdHNkAAAAAAAAAAEAAABXbXA0YQAAAAAAAAABAAAAAAAAAAAAAgAQAAAAALuAAAAAAAAzZXNkcwAAAAADgICAIgABAASAgIAUQBUAAAAAAAAAAAAAAAWAgIACEZAGgICAAQIAAAAQc3R0cwAAAAAAAAAAAAAAEHN0c2MAAAAAAAAAAAAAABRzdHN6AAAAAAAAAAAAAAAAAAAAEHN0Y28AAAAAAAAAAAAAAeV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAoAAAAFoAAAAAAGBbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAA9CQAAAAABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABLG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAOxzdGJsAAAAoHN0c2QAAAAAAAAAAQAAAJBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAoABaABIAAAASAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAOmF2Y0MBTUAe/+EAI2dNQB6WUoFAX/LgLUBAQFAAAD6AAA6mDgAAHoQAA9CW7y4KAQAEaOuPIAAAABBzdHRzAAAAAAAAAAAAAAAQc3RzYwAAAAAAAAAAAAAAFHN0c3oAAAAAAAAAAAAAAAAAAAAQc3RjbwAAAAAAAAAAAAAASG12ZXgAAAAgdHJleAAAAAAAAAABAAAAAQAAAC4AAAAAAoAAAAAAACB0cmV4AAAAAAAAAAIAAAABAACCNQAAAAACQAAA', options).then(function(response) {
@@ -383,6 +458,30 @@ twitch-videoad.js text/javascript
         }
         return newServerTime ? encodingsM3u8.replace(new RegExp('(SERVER-TIME=")[0-9.]+"'), `SERVER-TIME="${newServerTime}"`) : encodingsM3u8;
     }
+    function debugLog(event, data) {
+        if (!DebugEnabled) {
+            return;
+        }
+        try {
+            postMessage({
+                key: 'DebugLog',
+                event,
+                data
+            });
+        } catch {
+            try {
+                console.log('[twitch-adblock]', event, data);
+            } catch {}
+        }
+    }
+    function summarizeUrl(url) {
+        try {
+            const parsedUrl = new URL(url);
+            return parsedUrl.origin + parsedUrl.pathname;
+        } catch {
+            return String(url).slice(0, 180);
+        }
+    }
     function hasAdMarkers(textStr) {
         const lowerText = textStr.toLowerCase();
         return textStr.includes(AdSignifier)
@@ -404,10 +503,42 @@ twitch-videoad.js text/javascript
         return trimmed.length > 0 && !trimmed.startsWith('#');
     }
     function cacheAdSegment(segmentUrl, streamInfo) {
-        if (!AdSegmentCache.has(segmentUrl)) {
+        const isNewSegment = !AdSegmentCache.has(segmentUrl);
+        if (isNewSegment) {
             streamInfo.NumStrippedAdSegments++;
         }
         AdSegmentCache.set(segmentUrl, Date.now());
+        debugLog('cache-ad-segment', {
+            channelName: streamInfo.ChannelName,
+            segmentUrl: summarizeUrl(segmentUrl),
+            isNewSegment,
+            cachedSegments: AdSegmentCache.size
+        });
+    }
+    function getAdMarkerSummary(textStr) {
+        const lines = textStr.replaceAll('\r', '').split('\n');
+        const markerLines = [];
+        let segmentCount = 0;
+        let liveSegmentCount = 0;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.startsWith('#EXTINF')) {
+                segmentCount++;
+                if (line.includes(',live')) {
+                    liveSegmentCount++;
+                }
+            }
+            if (isAdMarkerLine(line)) {
+                markerLines.push(line.slice(0, 180));
+            }
+        }
+        return {
+            lineCount: lines.length,
+            segmentCount,
+            liveSegmentCount,
+            markerCount: markerLines.length,
+            sampleMarkers: markerLines.slice(0, 8)
+        };
     }
     function stripAdSegments(textStr, stripAllSegments, streamInfo) {
         let hasStrippedAdSegments = false;
@@ -497,6 +628,13 @@ twitch-videoad.js text/javascript
         const haveAdTags = hasAdMarkers(textStr) || SimulatedAdsDepth > 0;
         if (haveAdTags) {
             streamInfo.IsMidroll = textStr.toLowerCase().includes('midroll');
+            debugLog('ad-playlist', {
+                channelName: streamInfo.ChannelName,
+                playlistUrl: summarizeUrl(url),
+                isMidroll: streamInfo.IsMidroll,
+                activeBackupPlayerType: streamInfo.ActiveBackupPlayerType,
+                summary: getAdMarkerSummary(textStr)
+            });
             if (!streamInfo.IsShowingAd) {
                 streamInfo.IsShowingAd = true;
                 postMessage({
@@ -524,6 +662,11 @@ twitch-videoad.js text/javascript
             const currentResolution = streamInfo.Urls[url];
             if (!currentResolution) {
                 console.log('Ads will leak due to missing resolution info for ' + url);
+                debugLog('missing-resolution-info', {
+                    playlistUrl: summarizeUrl(url),
+                    knownUrlCount: Object.keys(streamInfo.Urls).length,
+                    summary: getAdMarkerSummary(textStr)
+                });
                 return textStr;
             }
             const isHevc = currentResolution.Codecs.startsWith('hev') || currentResolution.Codecs.startsWith('hvc');
@@ -575,10 +718,21 @@ twitch-videoad.js text/javascript
                             if (streamM3u8Response.status == 200) {
                                 const m3u8Text = await streamM3u8Response.text();
                                 if (m3u8Text) {
+                                    const backupHasAdMarkers = hasAdMarkers(m3u8Text);
+                                    debugLog('backup-playlist', {
+                                        channelName: streamInfo.ChannelName,
+                                        playerType,
+                                        isFreshM3u8,
+                                        isFullyCachedPlayerType,
+                                        isDoingMinimalRequests,
+                                        streamM3u8Url: summarizeUrl(streamM3u8Url),
+                                        hasAdMarkers: backupHasAdMarkers,
+                                        summary: getAdMarkerSummary(m3u8Text)
+                                    });
                                     if (playerType == FallbackPlayerType) {
                                         fallbackM3u8 = m3u8Text;
                                     }
-                                    if ((!hasAdMarkers(m3u8Text) && (SimulatedAdsDepth == 0 || playerTypeIndex >= SimulatedAdsDepth - 1)) || (!fallbackM3u8 && playerTypeIndex >= BackupPlayerTypes.length - 1)) {
+                                    if ((!backupHasAdMarkers && (SimulatedAdsDepth == 0 || playerTypeIndex >= SimulatedAdsDepth - 1)) || (!fallbackM3u8 && playerTypeIndex >= BackupPlayerTypes.length - 1)) {
                                         backupPlayerType = playerType;
                                         backupM3u8 = m3u8Text;
                                         break;
@@ -607,6 +761,12 @@ twitch-videoad.js text/javascript
             }
             if (backupM3u8) {
                 textStr = backupM3u8;
+                debugLog('backup-selected', {
+                    channelName: streamInfo.ChannelName,
+                    playerType: backupPlayerType,
+                    isMidroll: streamInfo.IsMidroll,
+                    summary: getAdMarkerSummary(backupM3u8)
+                });
                 if (streamInfo.ActiveBackupPlayerType != backupPlayerType) {
                     streamInfo.ActiveBackupPlayerType = backupPlayerType;
                     console.log(`Blocking${(streamInfo.IsMidroll ? ' midroll ' : ' ')}ads (${backupPlayerType})`);
@@ -615,10 +775,24 @@ twitch-videoad.js text/javascript
             // TODO: Improve hevc stripping. It should always strip when there is a codec mismatch (both ways)
             const stripHevc = isHevc && streamInfo.ModifiedM3U8;
             if (IsAdStrippingEnabled || stripHevc) {
+                const strippedBefore = streamInfo.NumStrippedAdSegments;
                 textStr = stripAdSegments(textStr, stripHevc, streamInfo);
+                debugLog('strip-result', {
+                    channelName: streamInfo.ChannelName,
+                    stripHevc,
+                    isStrippingAdSegments: streamInfo.IsStrippingAdSegments,
+                    newlyStrippedSegments: streamInfo.NumStrippedAdSegments - strippedBefore,
+                    totalStrippedSegments: streamInfo.NumStrippedAdSegments,
+                    outputSummary: getAdMarkerSummary(textStr)
+                });
             }
         } else if (streamInfo.IsShowingAd) {
             console.log('Finished blocking ads');
+            debugLog('ad-finished', {
+                channelName: streamInfo.ChannelName,
+                activeBackupPlayerType: streamInfo.ActiveBackupPlayerType,
+                totalStrippedSegments: streamInfo.NumStrippedAdSegments
+            });
             streamInfo.IsShowingAd = false;
             streamInfo.IsStrippingAdSegments = false;
             streamInfo.NumStrippedAdSegments = 0;
@@ -1126,6 +1300,7 @@ twitch-videoad.js text/javascript
         }
     }
     declareOptions(window);
+    installTwitchAdblockDebugHelpers();
     hookWindowWorker();
     hookFetch();
     if (PlayerBufferingFix) {
