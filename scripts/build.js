@@ -18,7 +18,17 @@ fs.mkdirSync(distDir, { recursive: true });
 const parsed = parseSource(source);
 assertValidJavaScript(parsed.script);
 
-const ublockResource = `${parsed.resourceName} ${parsed.mimeType} ${parsed.script}\n`;
+const selfTestResource = `twitch-adblock-test.js text/javascript (function() {
+  window.twitchAdblockSelfTest = {
+    ok: true,
+    version: '0.1.6',
+    loadedAt: new Date().toISOString(),
+    href: location.href
+  };
+  console.log('[twitch-adblock] self-test loaded', window.twitchAdblockSelfTest);
+})();`;
+
+const ublockResource = `${parsed.resourceName} ${parsed.mimeType} ${parsed.script}\n${selfTestResource}\n`;
 const userscript = `// ==UserScript==
 // @name         Personal Twitch VAFT
 // @namespace    personal-twitch-vaft

@@ -2,7 +2,7 @@ twitch-videoad.js text/javascript (function() {
     if ( /(^|\.)twitch\.tv$/.test(document.location.hostname) === false ) { return; }
     'use strict';
     const ourTwitchAdSolutionsVersion = 24;// Used to prevent conflicts with outdated versions of the scripts
-    const twitchAdblockVersion = '0.1.5';
+    const twitchAdblockVersion = '0.1.6';
     const twitchAdblockDebugKey = 'twitch-adblock-debug';
     const twitchAdblockDebugLimit = 200;
     window.__twitchAdblockWorkers = window.__twitchAdblockWorkers || [];
@@ -1331,4 +1331,13 @@ twitch-videoad.js text/javascript (function() {
     window.allSegmentsAreAdSegments = () => {
         postTwitchWorkerMessage('AllSegmentsAreAdSegments');
     };
+})();
+twitch-adblock-test.js text/javascript (function() {
+  window.twitchAdblockSelfTest = {
+    ok: true,
+    version: '0.1.6',
+    loadedAt: new Date().toISOString(),
+    href: location.href
+  };
+  console.log('[twitch-adblock] self-test loaded', window.twitchAdblockSelfTest);
 })();
