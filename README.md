@@ -18,10 +18,10 @@ A minimal uBlock Origin resource for Twitch video ad filtering.
    - Replace `unset` with this URL:
 
 ```text
-https://raw.githubusercontent.com/Retrorerr/twitch-adblock/bea49f55ac7689ba7f5c6995f709a36511c2698c/dist/vaft-ublock-origin.js
+https://raw.githubusercontent.com/Retrorerr/twitch-adblock/5da5a91fc1036e480918b0a775173baa4ee40318/dist/vaft-ublock-origin.js
 ```
 
-This URL is pinned to `v0.1.5`, so uBlock Origin fetches the exact script version shown in the overlay.
+This URL is pinned to `v0.1.6`, so uBlock Origin fetches the exact script version shown in the overlay.
 
 If `userResourcesLocation` already has something in it, add a space after the existing value and paste the URL after it.
 
@@ -35,7 +35,9 @@ twitch.tv##+js(twitch-videoad)
 
 5. Apply the changes.
    - Click **Apply changes**.
-   - Restart the browser, or reload uBlock Origin from the browser extensions page.
+   - Restart the browser, or disable and re-enable uBlock Origin from the browser extensions page.
+
+The filter name intentionally omits `.js`: `twitch-videoad` maps to the `twitch-videoad.js` resource inside `vaft-ublock-origin.js`.
 
 ## Files
 
@@ -52,6 +54,27 @@ npm run check
 ```
 
 ## Debugging
+
+To test whether uBlock Origin is running custom resources at all, temporarily add this line to **My filters**:
+
+```text
+twitch.tv##+js(twitch-adblock-test)
+```
+
+Open Twitch and run:
+
+```js
+window.twitchAdblockSelfTest
+```
+
+If that is undefined, uBlock Origin has not loaded or applied the custom resource file.
+Recheck the resource URL, click **Apply changes** in uBlock Origin, and restart the browser or disable and re-enable uBlock Origin.
+
+Remove the self-test filter after this check:
+
+```text
+twitch.tv##+js(twitch-adblock-test)
+```
 
 Open Twitch, then run this in the browser console and reload the page:
 
