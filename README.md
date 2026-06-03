@@ -18,10 +18,10 @@ A minimal uBlock Origin resource for Twitch video ad filtering.
    - Replace `unset` with this URL:
 
 ```text
-https://raw.githubusercontent.com/Retrorerr/twitch-adblock/097df1211890960f3de15bf87edca6c0de9ea7ed/dist/vaft-ublock-origin.js
+https://raw.githubusercontent.com/Retrorerr/twitch-adblock/61e4127cd0303d78b73ce8616a17a70be6f9510f/dist/vaft-ublock-origin.js
 ```
 
-This URL is pinned to `v0.1.3`, so uBlock Origin fetches the exact script version shown in the overlay.
+This URL is pinned to `v0.1.4`, so uBlock Origin fetches the exact script version shown in the overlay.
 
 If `userResourcesLocation` already has something in it, add a space after the existing value and paste the URL after it.
 
@@ -49,6 +49,27 @@ twitch.tv##+js(twitch-videoad)
 ```sh
 npm run build
 npm run check
+```
+
+## Debugging
+
+Open Twitch, then run this in the browser console and reload the page:
+
+```js
+localStorage.setItem('twitch-adblock-debug', '1');
+location.reload();
+```
+
+After an ad leaks or the overlay appears, run:
+
+```js
+copy(JSON.stringify(window.twitchAdblockDebug.dump(), null, 2));
+```
+
+Paste the copied debug output into an issue or discussion. To turn logging off:
+
+```js
+window.twitchAdblockDebug.disable();
 ```
 
 ## Notes
