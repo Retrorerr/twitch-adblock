@@ -28,7 +28,6 @@ If `userResourcesLocation` already has something in it, add a space after the ex
 4. Add the Twitch filter.
    - Go to the **My filters** tab.
    - Make sure **Enable my custom filters** is checked.
-   - If **Trust my filters** is shown, check it. If it is not shown, make sure the advanced setting `trustedListPrefixes` contains `user-`, for example `ublock- user-`.
    - Add this line:
 
 ```text
@@ -71,7 +70,7 @@ window.twitchAdblockSelfTest
 ```
 
 If that is undefined, uBlock Origin has not loaded or applied the custom resource file.
-Recheck the resource URL, **Enable my custom filters**, **Trust my filters**, click **Apply changes**, update the `uBlock filters` cache, and restart the browser or disable and re-enable uBlock Origin.
+Recheck the resource URL, **Enable my custom filters**, click **Apply changes**, update the `uBlock filters` cache, and restart the browser or disable and re-enable uBlock Origin.
 
 Remove the self-test filter after this check:
 
