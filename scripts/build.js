@@ -22,7 +22,7 @@ const selfTestResource = `twitch-adblock-test.js text/javascript
 (function() {
   window.twitchAdblockSelfTest = {
     ok: true,
-    version: '0.1.8',
+    version: '0.1.9',
     loadedAt: new Date().toISOString(),
     href: location.href
   };

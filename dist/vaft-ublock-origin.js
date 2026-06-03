@@ -3,7 +3,7 @@ twitch-videoad.js text/javascript
     if ( /(^|\.)twitch\.tv$/.test(document.location.hostname) === false ) { return; }
     'use strict';
     const ourTwitchAdSolutionsVersion = 24;// Used to prevent conflicts with outdated versions of the scripts
-    const twitchAdblockVersion = '0.1.8';
+    const twitchAdblockVersion = '0.1.9';
     const twitchAdblockDebugKey = 'twitch-adblock-debug';
     const twitchAdblockDebugLimit = 200;
     window.__twitchAdblockWorkers = window.__twitchAdblockWorkers || [];
@@ -57,7 +57,7 @@ twitch-videoad.js text/javascript
         scope.PlayerBufferingPrerollCheckOffset = 5;// How far the stream need to move before doing the buffering mitigation (depends on PlayerBufferingPrerollCheckEnabled being true)
         scope.V2API = false;
         scope.IsAdStrippingEnabled = true;
-        scope.PauseResumePlayerAfterAd = false;// Smoother mode: do not force pause/play after an ad unless you need it to recover stuck playback.
+        scope.PauseResumePlayerAfterAd = true;// Light post-ad recovery nudge. This is cheaper than a full player reload.
         scope.AdSegmentCache = new Map();
         scope.AllSegmentsAreAdSegments = false;
         scope.DebugEnabled = false;
@@ -271,8 +271,10 @@ twitch-videoad.js text/javascript
                     if (e.data.key == 'UpdateAdBlockBanner') {
                         updateAdblockBanner(e.data);
                     } else if (e.data.key == 'PauseResumePlayer') {
+                        recordTwitchAdblockDebug('page', 'player-task-request', { task: 'pause-resume' });
                         doTwitchPlayerTask(true, false);
                     } else if (e.data.key == 'ReloadPlayer') {
+                        recordTwitchAdblockDebug('page', 'player-task-request', { task: 'reload' });
                         doTwitchPlayerTask(false, true);
                     } else if (e.data.key == 'DebugLog') {
                         recordTwitchAdblockDebug('worker', e.data.event, e.data.data);
@@ -810,10 +812,12 @@ twitch-videoad.js text/javascript
             if (streamInfo.IsUsingModifiedM3U8 || ReloadPlayerAfterAd) {
                 streamInfo.IsUsingModifiedM3U8 = false;
                 streamInfo.LastPlayerReload = Date.now();
+                debugLog('post-ad-recovery', { action: 'reload' });
                 postMessage({
                     key: 'ReloadPlayer'
                 });
             } else if (PauseResumePlayerAfterAd) {
+                debugLog('post-ad-recovery', { action: 'pause-resume' });
                 postMessage({
                     key: 'PauseResumePlayer'
                 });
@@ -1064,24 +1068,29 @@ twitch-videoad.js text/javascript
         const playerAndState = getPlayerAndState();
         if (!playerAndState) {
             console.log('Could not find react root');
+            recordTwitchAdblockDebug('page', 'player-task-skipped', { reason: 'missing-react-root', isPausePlay, isReload });
             return;
         }
         const player = playerAndState.player;
         const playerState = playerAndState.state;
         if (!player) {
             console.log('Could not find player');
+            recordTwitchAdblockDebug('page', 'player-task-skipped', { reason: 'missing-player', isPausePlay, isReload });
             return;
         }
         if (!playerState) {
             console.log('Could not find player state');
+            recordTwitchAdblockDebug('page', 'player-task-skipped', { reason: 'missing-player-state', isPausePlay, isReload });
             return;
         }
         if (player.isPaused() || player.core?.paused) {
+            recordTwitchAdblockDebug('page', 'player-task-skipped', { reason: 'player-paused', isPausePlay, isReload });
             return;
         }
         playerBufferState.lastFixTime = Date.now();
         playerBufferState.numSame = 0;
         if (isPausePlay) {
+            recordTwitchAdblockDebug('page', 'player-task-run', { task: 'pause-resume' });
             player.pause();
             player.play();
             return;
@@ -1106,6 +1115,7 @@ twitch-videoad.js text/javascript
                 }
             } catch {}
             console.log('Reloading Twitch player');
+            recordTwitchAdblockDebug('page', 'player-task-run', { task: 'reload' });
             playerState.setSrc({ isNewMediaPlayerInstance: true, refreshAccessToken: true });
             postTwitchWorkerMessage('TriggeredPlayerReload');
             player.play();
@@ -1338,7 +1348,7 @@ twitch-adblock-test.js text/javascript
 (function() {
   window.twitchAdblockSelfTest = {
     ok: true,
-    version: '0.1.8',
+    version: '0.1.9',
     loadedAt: new Date().toISOString(),
     href: location.href
   };
