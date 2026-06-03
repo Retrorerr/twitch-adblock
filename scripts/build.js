@@ -18,17 +18,20 @@ fs.mkdirSync(distDir, { recursive: true });
 const parsed = parseSource(source);
 assertValidJavaScript(parsed.script);
 
-const selfTestResource = `twitch-adblock-test.js text/javascript (function() {
+const selfTestResource = `twitch-adblock-test.js text/javascript
+(function() {
   window.twitchAdblockSelfTest = {
     ok: true,
-    version: '0.1.6',
+    version: '0.1.7',
     loadedAt: new Date().toISOString(),
     href: location.href
   };
   console.log('[twitch-adblock] self-test loaded', window.twitchAdblockSelfTest);
 })();`;
 
-const ublockResource = `${parsed.resourceName} ${parsed.mimeType} ${parsed.script}\n${selfTestResource}\n`;
+const ublockResource = `${parsed.resourceName} ${parsed.mimeType}\n${parsed.script}\n${selfTestResource}\n`;
+assertValidUblockResource(ublockResource);
+
 const userscript = `// ==UserScript==
 // @name         Personal Twitch VAFT
 // @namespace    personal-twitch-vaft
@@ -80,6 +83,16 @@ function assertValidJavaScript(value) {
     new Function(value);
   } catch (error) {
     throw new Error(`Generated script is not valid JavaScript: ${error.message}`);
+  }
+}
+
+function assertValidUblockResource(value) {
+  const lines = value.split(/\r?\n/);
+  for (const line of lines) {
+    const headerMatch = line.match(/^([^\s]+\.js)\s+(text\/javascript|application\/javascript)(?:\s+(.+))?$/);
+    if (headerMatch && headerMatch[3]) {
+      throw new Error(`uBlock Origin resource header must be on its own line: ${line}`);
+    }
   }
 }
 
