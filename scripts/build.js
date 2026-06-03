@@ -22,14 +22,14 @@ const selfTestResource = `twitch-adblock-test.js text/javascript
 (function() {
   window.twitchAdblockSelfTest = {
     ok: true,
-    version: '0.1.7',
+    version: '0.1.8',
     loadedAt: new Date().toISOString(),
     href: location.href
   };
   console.log('[twitch-adblock] self-test loaded', window.twitchAdblockSelfTest);
 })();`;
 
-const ublockResource = `${parsed.resourceName} ${parsed.mimeType}\n${parsed.script}\n${selfTestResource}\n`;
+const ublockResource = `${parsed.resourceName} ${parsed.mimeType}\n${parsed.script}\n\n${selfTestResource}\n`;
 assertValidUblockResource(ublockResource);
 
 const userscript = `// ==UserScript==
@@ -88,10 +88,24 @@ function assertValidJavaScript(value) {
 
 function assertValidUblockResource(value) {
   const lines = value.split(/\r?\n/);
+  let inBody = false;
+
   for (const line of lines) {
     const headerMatch = line.match(/^([^\s]+\.js)\s+(text\/javascript|application\/javascript)(?:\s+(.+))?$/);
     if (headerMatch && headerMatch[3]) {
       throw new Error(`uBlock Origin resource header must be on its own line: ${line}`);
+    }
+
+    if (headerMatch) {
+      if (inBody) {
+        throw new Error(`uBlock Origin resource header must be preceded by a blank line: ${line}`);
+      }
+      inBody = true;
+      continue;
+    }
+
+    if (line.trim() === '') {
+      inBody = false;
     }
   }
 }
