@@ -13,15 +13,25 @@
     if ( /(^|\.)twitch\.tv$/.test(document.location.hostname) === false ) { return; }
     'use strict';
     const ourTwitchAdSolutionsVersion = 24;// Used to prevent conflicts with outdated versions of the scripts
+    const twitchAdblockVersion = '0.1.5';
+    const twitchAdblockDebugKey = 'twitch-adblock-debug';
+    const twitchAdblockDebugLimit = 200;
+    window.__twitchAdblockWorkers = window.__twitchAdblockWorkers || [];
+    installTwitchAdblockDebugHelpers();
+    recordTwitchAdblockDebug('page', 'script-start', {
+        href: location.href,
+        existingTwitchAdSolutionsVersion: window.twitchAdSolutionsVersion
+    });
     if (typeof window.twitchAdSolutionsVersion !== 'undefined' && window.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log("skipping vaft as there's another script active. ourVersion:" + ourTwitchAdSolutionsVersion + " activeVersion:" + window.twitchAdSolutionsVersion);
+        recordTwitchAdblockDebug('page', 'skipped-conflict', {
+            ourVersion: ourTwitchAdSolutionsVersion,
+            activeVersion: window.twitchAdSolutionsVersion
+        });
         window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
-    const twitchAdblockVersion = '0.1.4';
-    const twitchAdblockDebugKey = 'twitch-adblock-debug';
-    const twitchAdblockDebugLimit = 200;
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
@@ -66,7 +76,7 @@
     let localStorageHookFailed = false;
     let lastAdblockOverlayText = null;
     let lastAdblockOverlayDisplay = null;
-    const twitchWorkers = [];
+    const twitchWorkers = window.__twitchAdblockWorkers;
     function isTwitchAdblockDebugEnabled() {
         try {
             return localStorage.getItem(twitchAdblockDebugKey) === '1' || window.__twitchAdblockDebugEnabled === true;
@@ -80,7 +90,7 @@
         try {
             localStorage.setItem(twitchAdblockDebugKey, isEnabled ? '1' : '0');
         } catch {}
-        twitchWorkers.forEach((worker) => worker.postMessage({
+        window.__twitchAdblockWorkers.forEach((worker) => worker.postMessage({
             key: 'SetDebugEnabled',
             value: isEnabled
         }));
@@ -1310,7 +1320,6 @@
         }
     }
     declareOptions(window);
-    installTwitchAdblockDebugHelpers();
     hookWindowWorker();
     hookFetch();
     if (PlayerBufferingFix) {
