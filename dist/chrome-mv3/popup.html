@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Twitch Adblock</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="brand">
+        <div class="logo-wrap">
+          <img src="icons/icon-48.png" alt="">
+        </div>
+        <div>
+          <h1>Twitch Adblock</h1>
+        </div>
+      </header>
+
+      <section id="status-card" class="status-card is-checking" aria-live="polite">
+        <div class="status-heading">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-title">Checking current tab</span>
+        </div>
+        <p id="status-detail">Looking for the protection layer on this page.</p>
+        <div class="metrics" aria-label="Protection details">
+          <div class="metric">
+            <strong id="worker-count">—</strong>
+            <span>workers hooked</span>
+          </div>
+          <div class="metric">
+            <strong id="event-count">—</strong>
+            <span>diagnostic events</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="refresh-button" class="button button-primary" type="button">
+          <span class="button-icon" aria-hidden="true">↻</span>
+          Refresh status
+        </button>
+        <button id="copy-button" class="button button-secondary" type="button" disabled>
+          Copy diagnostics
+        </button>
+      </div>
+
+      <p id="notice" class="notice" role="status" aria-live="polite"></p>
+
+      <footer class="footer">
+        <span>Manifest V3 · <span id="version">v—</span></span>
+      </footer>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

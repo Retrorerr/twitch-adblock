@@ -2,10 +2,10 @@
   "name": "twitch-adblock",
   "version": "0.1.9",
   "private": true,
-  "description": "Minimal uBlock Origin resource for Twitch video ad filtering.",
+  "description": "Privacy-first Twitch video ad filtering source with uBlock Origin, userscript, and Chrome MV3 builds.",
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.js",
-    "check": "node --check scripts/build.js && node scripts/build.js"
+    "check": "node --check scripts/build.js && node scripts/build.js && node scripts/check-extension.js && node scripts/check-bridge.js"
   }
 }
