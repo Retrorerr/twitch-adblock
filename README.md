@@ -2,40 +2,24 @@
 
 ![Twitch Adblock logo](assets/twitch-adblock-logo.png)
 
-Privacy-first Twitch video ad filtering for Chrome and Microsoft Edge. The extension is self-contained, runs only on Twitch pages, and includes no analytics or remote code.
+Privacy-first Twitch video ad filtering for Chrome and Microsoft Edge. Download the validated release from GitHub, load it once, and keep browsing Twitch without store accounts or extra services.
 
 The same `src/vaft.js` source produces the Chrome/Edge extension, uBlock Origin resource, and userscript builds.
 
-## Install
+## Install from GitHub
 
-### Chrome Web Store and Edge Add-ons
+The GitHub Release ZIP is the supported install path for both Chrome and Edge. It is built and validated by GitHub Actions, with `manifest.json` placed at the ZIP root for a straightforward unpacked install.
 
-The public store listings are being prepared. Once they are live, they will be the recommended one-click install path:
+[Download the latest Chrome/Edge ZIP](https://github.com/Retrorerr/twitch-adblock/releases/latest/download/twitch-adblock-chromium.zip) · [View all GitHub Releases](https://github.com/Retrorerr/twitch-adblock/releases)
 
-- Chrome Web Store: coming soon
-- Microsoft Edge Add-ons: coming soon
-
-The store listing copy, privacy answers, and submission checklist are in [`docs/store-listing.md`](docs/store-listing.md). The privacy policy is in [`PRIVACY.md`](PRIVACY.md).
-
-### GitHub download: Chrome and Edge
-
-This is the fallback for users who want to install the packaged extension before the store listings are live, or who prefer to download releases directly.
-
-1. Open the [GitHub Releases page](https://github.com/Retrorerr/twitch-adblock/releases).
-2. Download `twitch-adblock-chromium.zip` from the newest release.
-3. Extract the ZIP completely. Do not select the ZIP itself.
-4. Open the extensions page:
+1. Download `twitch-adblock-chromium.zip` from the latest release.
+2. Extract the ZIP completely. Do not select the ZIP itself.
+3. Open the extensions page:
    - Chrome: [`chrome://extensions`](chrome://extensions)
    - Edge: [`edge://extensions`](edge://extensions)
-5. Turn on **Developer mode**.
-6. Click **Load unpacked** and select the extracted folder whose contents include `manifest.json`.
-7. Open Twitch or reload an existing Twitch tab.
-
-After the first release, the stable direct download URL will be:
-
-```text
-https://github.com/Retrorerr/twitch-adblock/releases/latest/download/twitch-adblock-chromium.zip
-```
+4. Turn on **Developer mode**.
+5. Click **Load unpacked** and select the extracted folder whose contents include `manifest.json`.
+6. Open Twitch or reload an existing Twitch tab.
 
 When a new release is available, download and extract the new ZIP, then use the extension page's reload control or remove the old unpacked copy before loading the new folder.
 
