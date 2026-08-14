@@ -2,9 +2,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+const distDir = path.join(root, 'dist');
 const extensionDir = path.join(root, 'dist', 'chrome-mv3');
 const manifestPath = path.join(extensionDir, 'manifest.json');
 const sourcePath = path.join(root, 'src', 'vaft.js');
+const packageJson = readJson(path.join(root, 'package.json'));
 
 const manifest = readJson(manifestPath);
 const expectedMatches = [
@@ -22,6 +24,7 @@ const expectedIcons = {
 assert(manifest.manifest_version === 3, 'manifest_version must be 3');
 assert(manifest.name === 'Twitch Adblock', 'unexpected extension name');
 assert(typeof manifest.version === 'string' && manifest.version.length > 0, 'manifest version is missing');
+assert(manifest.version === packageJson.version, 'manifest version must match package.json');
 assert(manifest.icons && JSON.stringify(manifest.icons) === JSON.stringify(expectedIcons), 'manifest icons are incomplete');
 assert(manifest.action?.default_popup === 'popup.html', 'popup is not registered');
 assert(manifest.action?.default_icon && JSON.stringify(manifest.action.default_icon) === JSON.stringify(expectedIcons), 'action icons are incomplete');
@@ -58,6 +61,8 @@ for (const [size, iconPath] of Object.entries(expectedIcons)) {
 new Function(readFile('content.js'));
 new Function(readFile('bridge.js'));
 new Function(readFile('popup.js'));
+assert(readDistFile('vaft-ublock-origin.js').includes(`version: '${packageJson.version}'`), 'uBlock self-test version is stale');
+assert(readDistFile('vaft.user.js').includes(`// @version      ${packageJson.version}`), 'userscript version is stale');
 
 console.log('Chrome MV3 extension checks passed.');
 
@@ -70,6 +75,12 @@ function findContentScript(fileName) {
 function readFile(fileName) {
   const filePath = path.join(extensionDir, fileName);
   assert(fs.existsSync(filePath), `missing generated file: ${fileName}`);
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+function readDistFile(fileName) {
+  const filePath = path.join(distDir, fileName);
+  assert(fs.existsSync(filePath), `missing generated file: dist/${fileName}`);
   return fs.readFileSync(filePath, 'utf8');
 }
 
@@ -95,3 +106,4 @@ function assert(condition, message) {
     throw new Error(message);
   }
 }
+
