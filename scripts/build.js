@@ -50,7 +50,7 @@ const selfTestResource = `twitch-adblock-test.js text/javascript
 (function() {
   window.twitchAdblockSelfTest = {
     ok: true,
-    version: '0.1.9',
+    version: '${packageJson.version}',
     loadedAt: new Date().toISOString(),
     href: location.href
   };
@@ -63,7 +63,7 @@ assertValidUblockResource(ublockResource);
 const userscript = `// ==UserScript==
 // @name         Personal Twitch VAFT
 // @namespace    personal-twitch-vaft
-// @version      0.1.0
+// @version      ${packageJson.version}
 // @description  Personal VAFT-style Twitch script.
 // @match        https://www.twitch.tv/*
 // @match        https://m.twitch.tv/*
@@ -211,3 +211,4 @@ function indent(value, spaces) {
     .map((line) => (line.length ? padding + line : line))
     .join('\n');
 }
+

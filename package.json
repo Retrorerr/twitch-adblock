@@ -6,6 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.js",
-    "check": "node --check scripts/build.js && node scripts/build.js && node scripts/check-extension.js && node scripts/check-bridge.js"
+    "check": "node --check scripts/build.js && node --check scripts/package-extension.js && node scripts/build.js && node scripts/check-extension.js && node scripts/check-bridge.js"
   }
 }
+

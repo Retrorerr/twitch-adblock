@@ -1,84 +1,92 @@
-# twitch-adblock
+# Twitch Adblock
 
 ![Twitch Adblock logo](assets/twitch-adblock-logo.png)
 
-A privacy-first Twitch video ad filtering source that builds uBlock Origin, userscript, and a polished Chrome MV3 extension.
+Privacy-first Twitch video ad filtering for Chrome and Microsoft Edge. The extension is self-contained, runs only on Twitch pages, and includes no analytics or remote code.
 
-All three outputs are generated from the same `src/vaft.js` source, so the filtering logic stays aligned across installation methods. The Chrome build is a self-contained, unpacked extension with a compact status popup and no analytics or remote code.
+The same `src/vaft.js` source produces the Chrome/Edge extension, uBlock Origin resource, and userscript builds.
 
-## Chrome MV3 features
+## Install
 
-- Runs the bundled Twitch hooks at page start, where `window`, `Worker`, and `fetch` are available.
-- Shows protection state, hooked-worker count, and diagnostic-event count for the active Twitch tab.
-- Includes branded icons and a one-click **Copy diagnostics** action for troubleshooting.
-- Uses no background service worker, analytics, or broad runtime permissions.
+### Chrome Web Store and Edge Add-ons
 
-## Install in Chrome (MV3)
+The public store listings are being prepared. Once they are live, they will be the recommended one-click install path:
 
-1. Build the extension:
+- Chrome Web Store: coming soon
+- Microsoft Edge Add-ons: coming soon
 
-```sh
-npm run build
+The store listing copy, privacy answers, and submission checklist are in [`docs/store-listing.md`](docs/store-listing.md). The privacy policy is in [`PRIVACY.md`](PRIVACY.md).
+
+### GitHub download: Chrome and Edge
+
+This is the fallback for users who want to install the packaged extension before the store listings are live, or who prefer to download releases directly.
+
+1. Open the [GitHub Releases page](https://github.com/Retrorerr/twitch-adblock/releases).
+2. Download `twitch-adblock-chromium.zip` from the newest release.
+3. Extract the ZIP completely. Do not select the ZIP itself.
+4. Open the extensions page:
+   - Chrome: [`chrome://extensions`](chrome://extensions)
+   - Edge: [`edge://extensions`](edge://extensions)
+5. Turn on **Developer mode**.
+6. Click **Load unpacked** and select the extracted folder whose contents include `manifest.json`.
+7. Open Twitch or reload an existing Twitch tab.
+
+After the first release, the stable direct download URL will be:
+
+```text
+https://github.com/Retrorerr/twitch-adblock/releases/latest/download/twitch-adblock-chromium.zip
 ```
 
-2. Open `chrome://extensions` in Chrome and enable **Developer mode**.
+When a new release is available, download and extract the new ZIP, then use the extension page's reload control or remove the old unpacked copy before loading the new folder.
 
-3. Click **Load unpacked** and select the `dist/chrome-mv3` directory.
+## What it does
 
-4. Open or reload Twitch. After changing the source, run the build again, click the extension's reload button, and reload the Twitch tab.
+- Starts the bundled Twitch hooks at page start, where Twitch's `window`, `Worker`, and `fetch` objects are available.
+- Shows protection status, hooked-worker count, and diagnostic-event count for the active Twitch tab.
+- Includes a compact popup with branded icons and a user-triggered **Copy diagnostics** action.
+- Declares no broad browser API permissions and has no background service worker, analytics, or remote code.
 
-The MV3 build runs the same page script as the other outputs in Chrome's `MAIN` world at `document_start`, which is required for its Twitch `window`, `Worker`, and `fetch` hooks. The popup reports live protection status for the current tab, hooked-worker and diagnostic-event counts, and a one-click diagnostics export.
+## Troubleshooting
 
-## Install in uBlock Origin
+### “Manifest file is missing”
 
-1. Open the uBlock Origin dashboard.
-   - Click the uBlock Origin icon.
-   - Click the gear icon to open the dashboard.
+You selected the ZIP, its parent folder, or an extra nested folder. Extract the ZIP and choose the folder that directly contains `manifest.json`.
 
-2. Enable advanced settings.
-   - Go to the **Settings** tab.
-   - Check **I am an advanced user**.
-   - Click the small gear icon that appears next to it.
+### The popup says “Waiting for Twitch”
 
-3. Add the custom script resource.
-   - Find `userResourcesLocation`.
-   - Replace `unset` with this URL:
+Open a Twitch channel and reload the tab after installing or reloading the extension. The extension intentionally stays inactive on non-Twitch pages.
+
+### The extension was updated but Twitch still behaves like before
+
+Click the extension's reload button on the extensions page, then hard-refresh the Twitch tab. Do not keep two unpacked copies enabled at the same time.
+
+### Ads or playback problems continue
+
+Disable other Twitch video-ad scriptlets or extensions temporarily; overlapping Twitch adblockers can conflict. If the issue remains, open the popup on Twitch and use **Copy diagnostics** before opening an issue.
+
+## Alternative: uBlock Origin
+
+The uBlock Origin resource remains available for advanced users who already use uBlock Origin.
+
+1. Open the uBlock Origin dashboard from the extension menu.
+2. In **Settings**, enable **I am an advanced user**, then click the small gear beside it.
+3. Find `userResourcesLocation` and add this pinned resource URL:
 
 ```text
 https://raw.githubusercontent.com/Retrorerr/twitch-adblock/45e7575f60b17d549c860496c5789ebbe134fb8a/dist/vaft-ublock-origin.js
 ```
 
-This URL is pinned to `v0.1.9`, so uBlock Origin fetches the exact script version shown in the overlay.
+If the setting already contains a value, add a space before the URL instead of deleting the existing value.
 
-If `userResourcesLocation` already has something in it, add a space after the existing value and paste the URL after it.
-
-4. Add the Twitch filter.
-   - Go to the **My filters** tab.
-   - Make sure **Enable my custom filters** is checked.
-   - Add this line:
+4. In **My filters**, make sure **Enable my custom filters** is checked and add:
 
 ```text
 twitch.tv##+js(twitch-videoad)
 ```
 
-5. Apply the changes.
-   - Click **Apply changes**.
-   - If this is a new install or version change, go to **Filter lists**, purge/update the `uBlock filters` cache, then click **Update now**.
-   - Restart the browser, or disable and re-enable uBlock Origin from the browser extensions page.
+5. Click **Apply changes**. For a first install or version change, purge/update the uBlock filter cache and restart the browser or reload uBlock Origin.
 
 The filter name intentionally omits `.js`: `twitch-videoad` maps to the `twitch-videoad.js` resource inside `vaft-ublock-origin.js`.
-
-## Files
-
-- `src/vaft.js` - source resource.
-- `src/chrome-mv3/` - MV3 bridge, popup, styles, and icon sources.
-- `assets/twitch-adblock-logo.png` - source logo artwork.
-- `dist/vaft-ublock-origin.js` - uBlock Origin resource.
-- `dist/vaft.user.js` - userscript build.
-- `dist/chrome-mv3/` - unpacked Chrome Manifest V3 extension build.
-- `scripts/build.js` - build script for all three outputs.
-- `scripts/check-extension.js` - MV3 manifest, asset, parity, and syntax checks.
-- `scripts/check-bridge.js` - page/isolated-world bridge simulation.
 
 ## Development
 
@@ -87,11 +95,26 @@ npm run build
 npm run check
 ```
 
-`npm run check` rebuilds the artifacts and verifies the MV3 manifest, icon dimensions/transparency, source parity, JavaScript syntax, and page/isolated bridge handshake.
+`npm run check` rebuilds every output and verifies the MV3 manifest, version alignment, icon dimensions/transparency, source parity, JavaScript syntax, and page/isolated-world bridge handshake.
+
+The release workflow packages only `dist/chrome-mv3`, validates its file allowlist, checks that `manifest.json` is at the ZIP root, and publishes the package when a tag matches `package.json`.
+
+## Files
+
+- `src/vaft.js` - shared Twitch filtering source.
+- `src/chrome-mv3/` - MV3 bridge, popup, styles, and icon sources.
+- `assets/twitch-adblock-logo.png` - source logo artwork.
+- `dist/vaft-ublock-origin.js` - uBlock Origin resource.
+- `dist/vaft.user.js` - userscript build.
+- `dist/chrome-mv3/` - unpacked Chrome/Edge MV3 build.
+- `scripts/build.js` - build script for all outputs.
+- `scripts/package-extension.js` - release-package staging and validation.
+- `scripts/check-extension.js` - MV3 manifest, asset, parity, version, and syntax checks.
+- `scripts/check-bridge.js` - page/isolated-world bridge simulation.
 
 ## Debugging
 
-To test whether uBlock Origin is running custom resources at all, temporarily add this line to **My filters**:
+To test whether uBlock Origin is running custom resources, temporarily add this line to **My filters**:
 
 ```text
 twitch.tv##+js(twitch-adblock-test)
@@ -103,34 +126,22 @@ Open Twitch and run:
 window.twitchAdblockSelfTest
 ```
 
-If that is undefined, uBlock Origin has not loaded or applied the custom resource file.
-Recheck the resource URL, **Enable my custom filters**, click **Apply changes**, update the `uBlock filters` cache, and restart the browser or disable and re-enable uBlock Origin.
+If that is undefined, recheck the resource URL, **Enable my custom filters**, **Apply changes**, the uBlock filter-cache update, and the browser restart/reload.
 
-Remove the self-test filter after this check:
-
-```text
-twitch.tv##+js(twitch-adblock-test)
-```
-
-Open Twitch, then run this in the browser console and reload the page:
+For detailed Twitch debugging, enable logging and reload the page:
 
 ```js
 localStorage.setItem('twitch-adblock-debug', '1');
 location.reload();
 ```
 
-After an ad leaks or the overlay appears, run:
+Then copy the debug dump:
 
 ```js
 copy(JSON.stringify(window.twitchAdblockDebug.dump(), null, 2));
 ```
 
-If `window.twitchAdblockDebug` is undefined after reloading Twitch, uBlock Origin did not run the resource. Recheck `userResourcesLocation`, the `twitch.tv##+js(twitch-videoad)` filter, and reload uBlock Origin from the browser extensions page.
-
-The Chrome MV3 build exposes the same `window.twitchAdblockDebug` helpers after the extension has been reloaded and the Twitch tab refreshed.
-You can also open the extension popup and choose **Copy diagnostics** while a Twitch tab is active.
-
-Paste the copied debug output into an issue or discussion. To turn logging off:
+Turn logging off with:
 
 ```js
 window.twitchAdblockDebug.disable();
@@ -138,6 +149,7 @@ window.twitchAdblockDebug.disable();
 
 ## Notes
 
-Based on `vaft` from [pixeltris/TwitchAdSolutions](https://github.com/pixeltris/TwitchAdSolutions), licensed under MIT.
+Based on [`vaft`](https://github.com/pixeltris/TwitchAdSolutions), licensed under MIT.
 
 Use one Twitch video ad scriptlet at a time. Multiple overlapping Twitch adblockers can conflict with playback.
+

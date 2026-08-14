@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Personal Twitch VAFT
 // @namespace    personal-twitch-vaft
-// @version      0.1.0
+// @version      0.1.9
 // @description  Personal VAFT-style Twitch script.
 // @match        https://www.twitch.tv/*
 // @match        https://m.twitch.tv/*
@@ -1353,3 +1353,4 @@
         postTwitchWorkerMessage('AllSegmentsAreAdSegments');
     };
 })();
+
