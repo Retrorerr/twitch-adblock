@@ -2,21 +2,22 @@
 
 ![Twitch Adblock logo](assets/twitch-adblock-logo.png)
 
-Privacy-first Twitch video ad filtering for Chrome and Microsoft Edge. Download the validated release from GitHub, load it once, and keep browsing Twitch without store accounts or extra services.
+VAFT-based Twitch video ad filtering for Chrome, Edge, and Brave—especially for users of uBlock Origin Lite.
 
-The same `src/vaft.js` source produces the Chrome/Edge extension, uBlock Origin resource, and userscript builds.
+uBlock Origin Lite cannot load the external VAFT scriptlet used by full uBlock Origin. This Manifest V3 extension fills that gap, using the same `src/vaft.js` source as the full uBlock Origin and userscript builds.
 
-## Install from GitHub
+## Install the MV3 extension
 
-The GitHub Release ZIP is the supported install path for both Chrome and Edge. It is built and validated by GitHub Actions, with `manifest.json` placed at the ZIP root for a straightforward unpacked install.
+The GitHub Release ZIP is the supported install for Chrome, Edge, and Brave. It is built and validated by GitHub Actions, with `manifest.json` at the ZIP root.
 
-[Download the latest Chrome/Edge ZIP](https://github.com/Retrorerr/twitch-adblock/releases/latest/download/twitch-adblock-chromium.zip) · [View all GitHub Releases](https://github.com/Retrorerr/twitch-adblock/releases)
+[Download the latest Chromium MV3 ZIP](https://github.com/Retrorerr/twitch-adblock/releases/latest/download/twitch-adblock-chromium.zip) · [View all GitHub Releases](https://github.com/Retrorerr/twitch-adblock/releases)
 
 1. Download `twitch-adblock-chromium.zip` from the latest release.
 2. Extract the ZIP completely. Do not select the ZIP itself.
 3. Open the extensions page:
    - Chrome: [`chrome://extensions`](chrome://extensions)
    - Edge: [`edge://extensions`](edge://extensions)
+   - Brave: [`brave://extensions`](brave://extensions)
 4. Turn on **Developer mode**.
 5. Click **Load unpacked** and select the extracted folder whose contents include `manifest.json`.
 6. Open Twitch or reload an existing Twitch tab.
@@ -48,9 +49,9 @@ Click the extension's reload button on the extensions page, then hard-refresh th
 
 Disable other Twitch video-ad scriptlets or extensions temporarily; overlapping Twitch adblockers can conflict. If the issue remains, open the popup on Twitch and use **Copy diagnostics** before opening an issue.
 
-## Alternative: uBlock Origin
+## Alternative: full uBlock Origin
 
-The uBlock Origin resource remains available for advanced users who already use uBlock Origin.
+This filter-based setup requires full uBlock Origin. It does not work in uBlock Origin Lite because Lite cannot load external scriptlet resources such as VAFT.
 
 1. Open the uBlock Origin dashboard from the extension menu.
 2. In **Settings**, enable **I am an advanced user**, then click the small gear beside it.
@@ -90,7 +91,7 @@ The release workflow packages only `dist/chrome-mv3`, validates its file allowli
 - `assets/twitch-adblock-logo.png` - source logo artwork.
 - `dist/vaft-ublock-origin.js` - uBlock Origin resource.
 - `dist/vaft.user.js` - userscript build.
-- `dist/chrome-mv3/` - unpacked Chrome/Edge MV3 build.
+- `dist/chrome-mv3/` - unpacked Chrome/Edge/Brave MV3 build.
 - `scripts/build.js` - build script for all outputs.
 - `scripts/package-extension.js` - release-package staging and validation.
 - `scripts/check-extension.js` - MV3 manifest, asset, parity, version, and syntax checks.
@@ -135,5 +136,5 @@ window.twitchAdblockDebug.disable();
 
 Based on [`vaft`](https://github.com/pixeltris/TwitchAdSolutions), licensed under MIT.
 
-Use one Twitch video ad scriptlet at a time. Multiple overlapping Twitch adblockers can conflict with playback.
+Use one VAFT installation method at a time. Do not run this MV3 extension alongside VAFT in full uBlock Origin or another Twitch video-ad scriptlet.
 
