@@ -3,7 +3,7 @@ twitch-videoad.js text/javascript
     if ( /(^|\.)twitch\.tv$/.test(document.location.hostname) === false ) { return; }
     'use strict';
     const ourTwitchAdSolutionsVersion = 24;// Used to prevent conflicts with outdated versions of the scripts
-    const twitchAdblockVersion = '0.1.9';
+    const twitchAdblockVersion = '0.2.0';
     const twitchAdblockDebugKey = 'twitch-adblock-debug';
     const twitchAdblockDebugLimit = 200;
     window.__twitchAdblockWorkers = window.__twitchAdblockWorkers || [];
@@ -1892,7 +1892,7 @@ twitch-adblock-test.js text/javascript
 (function() {
   window.twitchAdblockSelfTest = {
     ok: true,
-    version: '0.1.9',
+    version: '0.2.0',
     loadedAt: new Date().toISOString(),
     href: location.href
   };
