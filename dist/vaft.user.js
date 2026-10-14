@@ -1897,4 +1897,3 @@
         postTwitchWorkerMessage('AllSegmentsAreAdSegments');
     };
 })();
-
