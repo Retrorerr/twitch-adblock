@@ -36,18 +36,15 @@
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
         scope.BackupPlayerTypes = [
-            'embed',//Source. Fast first choice.
-            'autoplay',//Lower-quality fallback, but cheap and reliable.
-            //'popout',//Disabled for smoother ad transitions: extra fallback probing can cause long stalls.
-            //'picture-by-picture-CACHED'//360p (-CACHED is an internal suffix and is removed)
+            'embed',//Source
+            'popout',//Source (a separate session from the player's own popout session)
+            'autoplay',//360p. Last resort; switching resolution mid-stream costs a short decoder reset.
         ];
         scope.FallbackPlayerType = 'embed';
         scope.ForceAccessTokenPlayerType = 'popout';
         scope.SkipPlayerReloadOnHevc = true;// Smoother mode: avoid codec-triggered player reloads. If 1440p/4K errors occur in Chromium/Brave, set this back to false.
         scope.AlwaysReloadPlayerOnAd = false;// Always pause/play when entering/leaving ads
         scope.ReloadPlayerAfterAd = false;// Smoother mode: avoid full player reloads after ads.
-        scope.PlayerReloadMinimalRequestsTime = 5000;
-        scope.PlayerReloadMinimalRequestsPlayerIndex = 1;//autoplay; matches the trimmed BackupPlayerTypes list.
         scope.HasTriggeredPlayerReload = false;
         scope.StreamInfos = [];
         scope.StreamInfosByUrl = [];
@@ -57,17 +54,27 @@
         scope.ClientIntegrityHeader = null;
         scope.AuthorizationHeader = undefined;
         scope.SimulatedAdsDepth = 0;
-        scope.PlayerBufferingFix = false;// Smoother mode: disables aggressive pause/play buffering fixes. Turn true again only if streams get stuck.
-        scope.PlayerBufferingDelay = 1500;// If PlayerBufferingFix is re-enabled, check less often to reduce overhead.
-        scope.PlayerBufferingSameStateCount = 5;// Less twitchy if PlayerBufferingFix is re-enabled.
-        scope.PlayerBufferingDangerZone = 0.35;// Less likely to trigger a false pause/play during normal small buffer dips.
+        scope.PlayerBufferingFix = true;// Last-resort watchdog: pause/play only when playback is fully frozen (see PlayerBufferingSameStateCount).
+        scope.PlayerBufferingDelay = 1000;// How often to check the player state (in milliseconds)
+        scope.PlayerBufferingSameStateCount = 4;// Consecutive frozen checks before acting (~4 seconds of no progress)
+        scope.PlayerBufferingDangerZone = 0;// 0 = only act when the playback position is truly stuck, never on a low-but-moving buffer.
         scope.PlayerBufferingDoPlayerReload = false;// If true this will do a player reload instead of pause/play (player reloading is better at fixing the playback issues but it takes slightly longer)
         scope.PlayerBufferingMinRepeatDelay = 15000;// Longer cooldown between forced pause/play attempts.
         scope.PlayerBufferingPrerollCheckEnabled = true;// Avoid early false positives if PlayerBufferingFix is re-enabled.
         scope.PlayerBufferingPrerollCheckOffset = 5;// How far the stream need to move before doing the buffering mitigation (depends on PlayerBufferingPrerollCheckEnabled being true)
         scope.V2API = false;
         scope.IsAdStrippingEnabled = true;
-        scope.PauseResumePlayerAfterAd = true;// Light post-ad recovery nudge. This is cheaper than a full player reload.
+        scope.PauseResumePlayerAfterAd = false;// Forced pause/play after every ad. Not needed with SeamlessPlaylists and it causes a visible hitch.
+        scope.SeamlessPlaylists = true;// Stitch main + backup playlists into one continuous playlist numbered by Twitch's live sequence (see buildSeamlessPlaylist)
+        scope.SeamlessWindowSize = 15;// Max segments in the playlists we hand to the player
+        scope.SeamlessGapJumpSegments = 3;// If the next segment is missing but this many newer ones exist, skip ahead instead of waiting
+        scope.SeamlessMaxPdtDriftMs = 3000;// Reject a source whose timestamps disagree with what we've already shown by more than this
+        scope.SeamlessStallResetMs = 10000;// If the main stream progresses but our playlist hasn't for this long, rebuild and reload the player
+        scope.BackupEncodingsMaxAgeMs = 8 * 60 * 1000;// Access tokens last ~20 minutes; refresh well before that
+        scope.BackupSessionRefreshMs = 20000;// A backup session that has shown ads for this long gets a fresh access token
+        scope.BackupWarmIntervalMs = 45000;// While no ads are showing, re-poll one backup session this often (round-robin, after warming all of them once)
+        scope.BackupWarmStartDelayMs = 5000;// Don't compete with the player's own startup requests
+        scope.LastSeamlessReload = 0;
         scope.AdSegmentCache = new Map();
         scope.AllSegmentsAreAdSegments = false;
         scope.DebugEnabled = false;
@@ -211,6 +218,20 @@
                     ${getAdMarkerSummary.toString()}
                     ${stripAdSegments.toString()}
                     ${getStreamUrlForResolution.toString()}
+                    ${getVariantKey.toString()}
+                    ${getVariantKeyForUrl.toString()}
+                    ${parseM3u8Playlist.toString()}
+                    ${mapLiveSequences.toString()}
+                    ${isDroppedPlaylistTag.toString()}
+                    ${getSeamlessState.toString()}
+                    ${isSourceAligned.toString()}
+                    ${buildSeamlessPlaylist.toString()}
+                    ${renderSeamlessPlaylist.toString()}
+                    ${getBackupState.toString()}
+                    ${ensureBackupEncodings.toString()}
+                    ${fetchBackupPlaylist.toString()}
+                    ${getBackupPlaylists.toString()}
+                    ${warmBackupPlaylist.toString()}
                     ${processM3U8.toString()}
                     ${hookWorkerFetch.toString()}
                     ${declareOptions.toString()}
@@ -346,10 +367,17 @@
                 }
                 url = url.trimEnd();
                 if (url.endsWith('m3u8')) {
+                    // While an ad break is running, fetch the backup playlists at the same time as the main one so
+                    // the player's playlist request isn't delayed by two round trips back to back.
+                    const adStreamInfo = StreamInfosByUrl[url];
+                    let backupPromise = null;
+                    if (adStreamInfo && adStreamInfo.IsShowingAd && adStreamInfo.Urls[url]) {
+                        backupPromise = getBackupPlaylists(adStreamInfo, adStreamInfo.Urls[url], realFetch).catch(() => []);
+                    }
                     return new Promise(function(resolve, reject) {
                         const processAfter = async function(response) {
                             if (response.status === 200) {
-                                resolve(new Response(await processM3U8(url, await response.text(), realFetch)));
+                                resolve(new Response(await processM3U8(url, await response.text(), realFetch, backupPromise)));
                             } else {
                                 resolve(response);
                             }
@@ -385,6 +413,7 @@
                                 if (streamInfo == null || streamInfo.EncodingsM3U8 == null) {
                                     StreamInfos[channelName] = streamInfo = {
                                         ChannelName: channelName,
+                                        CreatedAt: Date.now(),
                                         IsShowingAd: false,
                                         LastPlayerReload: 0,
                                         EncodingsM3U8: encodingsM3u8,
@@ -394,7 +423,11 @@
                                         RequestedAds: new Set(),
                                         Urls: [],// xxx.m3u8 -> { Resolution: "284x160", FrameRate: 30.0 }
                                         ResolutionList: [],
-                                        BackupEncodingsM3U8Cache: [],
+                                        BackupStates: {},// playerType -> session/encodings state (see getBackupState)
+                                        PreferredBackupType: null,
+                                        BackupWarmAt: 0,
+                                        BackupWarmIndex: 0,
+                                        SeamlessStates: {},// variant playlist url -> continuous playlist state (see getSeamlessState)
                                         ActiveBackupPlayerType: null,
                                         IsMidroll: false,
                                         IsStrippingAdSegments: false,
@@ -638,7 +671,572 @@
         }
         return closestResolutionUrl;
     }
-    async function processM3U8(url, textStr, realFetch) {
+    function getVariantKey(resolutionInfo) {
+        if (!resolutionInfo) {
+            return null;
+        }
+        return resolutionInfo.Resolution + '|' + resolutionInfo.FrameRate + '|' + resolutionInfo.Codecs;
+    }
+    function getVariantKeyForUrl(encodingsM3u8, streamM3u8Url) {
+        const encodingsLines = encodingsM3u8.replaceAll('\r', '').split('\n');
+        for (let i = 1; i < encodingsLines.length; i++) {
+            if (encodingsLines[i] == streamM3u8Url && encodingsLines[i - 1].startsWith('#EXT-X-STREAM-INF')) {
+                const attributes = parseAttributes(encodingsLines[i - 1].substring(encodingsLines[i - 1].indexOf(':') + 1));
+                return getVariantKey({
+                    Resolution: attributes['RESOLUTION'],
+                    FrameRate: attributes['FRAME-RATE'],
+                    Codecs: attributes['CODECS']
+                });
+            }
+        }
+        return null;
+    }
+    function isDroppedPlaylistTag(line, playlistHasAds) {
+        return line.startsWith('#EXT-X-START')
+            || isAdMarkerLine(line)
+            || (line.includes('X-TV-TWITCH-STREAM-SOURCE=') && !line.includes('X-TV-TWITCH-STREAM-SOURCE="live"'))
+            || (playlistHasAds && line.includes('CLASS="twitch-trigger"'));
+    }
+    function parseM3u8Playlist(textStr) {
+        // Splits a media playlist into header tags, segments and low latency prefetch hints.
+        const playlist = {
+            header: [],
+            segments: [],
+            prefetch: [],
+            mediaSequence: null,
+            liveSequence: null,
+            targetDuration: null,
+            hasAds: hasAdMarkers(textStr),
+            hasEndList: false
+        };
+        const lines = textStr.replaceAll('\r', '').split('\n');
+        let pending = null;
+        let currentMap = null;
+        let isInSegments = false;
+        const getPending = () => pending || (pending = { tags: [], pdt: NaN, discontinuity: false, extinf: null });
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) {
+                continue;
+            }
+            if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+                playlist.mediaSequence = parseInt(line.substring(line.indexOf(':') + 1), 10);
+            } else if (line.startsWith('#EXT-X-TWITCH-LIVE-SEQUENCE:')) {
+                playlist.liveSequence = parseInt(line.substring(line.indexOf(':') + 1), 10);
+            } else if (line.startsWith('#EXT-X-TARGETDURATION:')) {
+                playlist.targetDuration = parseInt(line.substring(line.indexOf(':') + 1), 10);
+            } else if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
+                // Regenerated when rendering
+            } else if (line == '#EXT-X-ENDLIST') {
+                playlist.hasEndList = true;
+            } else if (line.startsWith('#EXT-X-TWITCH-PREFETCH:')) {
+                playlist.prefetch.push(line);
+            } else if (line.startsWith('#EXT-X-MAP:')) {
+                currentMap = line;
+                isInSegments = true;
+            } else if (line.startsWith('#EXT-X-PROGRAM-DATE-TIME:')) {
+                getPending().pdt = Date.parse(line.substring(line.indexOf(':') + 1));
+                isInSegments = true;
+            } else if (line == '#EXT-X-DISCONTINUITY') {
+                getPending().discontinuity = true;
+                isInSegments = true;
+            } else if (line.startsWith('#EXTINF:')) {
+                const segment = getPending();
+                segment.extinf = line;
+                segment.duration = parseFloat(line.substring(line.indexOf(':') + 1)) || 2;
+                segment.isLive = line.includes(',live');
+                isInSegments = true;
+            } else if (line.startsWith('#')) {
+                if (!isInSegments) {
+                    playlist.header.push(line);
+                } else if (!isDroppedPlaylistTag(line, true)) {
+                    getPending().tags.push(line);
+                }
+            } else if (pending && pending.extinf) {
+                pending.uri = line;
+                pending.map = currentMap;
+                pending.seq = null;
+                playlist.segments.push(pending);
+                pending = null;
+            }
+        }
+        for (let i = 1; i < playlist.segments.length; i++) {
+            const segment = playlist.segments[i];
+            if (!Number.isFinite(segment.pdt) && Number.isFinite(playlist.segments[i - 1].pdt)) {
+                segment.pdt = playlist.segments[i - 1].pdt + playlist.segments[i - 1].duration * 1000;
+            }
+        }
+        return playlist;
+    }
+    function mapLiveSequences(playlist) {
+        // Gives every usable segment its global live sequence number. Twitch numbers live segments identically in
+        // every session, but a session that had an ad stitched in restarts MEDIA-SEQUENCE and shifts its timestamps.
+        // EXT-X-TWITCH-LIVE-SEQUENCE is the live sequence of the first live segment in the playlist, so it lets us
+        // translate any session back onto the shared live numbering.
+        const segments = playlist.segments;
+        if (!playlist.hasAds) {
+            const baseSequence = playlist.liveSequence !== null ? playlist.liveSequence : playlist.mediaSequence;
+            if (baseSequence === null || Number.isNaN(baseSequence)) {
+                return false;
+            }
+            segments.forEach((segment, index) => {
+                segment.seq = baseSequence + index;
+            });
+            return segments.length > 0;
+        }
+        if (playlist.liveSequence === null || Number.isNaN(playlist.liveSequence)) {
+            return false;
+        }
+        let runCount = 0;
+        let runStart = -1;
+        for (let i = 0; i < segments.length; i++) {
+            if (segments[i].isLive && (i == 0 || !segments[i - 1].isLive || segments[i].discontinuity)) {
+                runCount++;
+                runStart = i;
+            }
+        }
+        if (runCount != 1) {
+            // Live content on both sides of an ad. Which side LIVE-SEQUENCE refers to is ambiguous, so let the
+            // backup streams cover this window instead of guessing.
+            return false;
+        }
+        for (let i = runStart; i < segments.length && segments[i].isLive && (i == runStart || !segments[i].discontinuity); i++) {
+            segments[i].seq = playlist.liveSequence + (i - runStart);
+        }
+        return true;
+    }
+    function getSeamlessState(streamInfo, url) {
+        const now = Date.now();
+        let state = streamInfo.SeamlessStates[url];
+        if (state && state.lastRequestAt < now - 10000) {
+            // The player stopped polling this variant (quality switch / pause). Start fresh rather than resuming a stale timeline.
+            state = null;
+        }
+        if (!state) {
+            state = streamInfo.SeamlessStates[url] = {
+                segments: [],
+                discontinuitySequence: 0,
+                hadLegacyOutput: false,
+                lastAdvanceAt: now,
+                mainProgressAt: now,
+                mainLastUri: null,
+                lastRequestAt: now
+            };
+        }
+        state.lastRequestAt = now;
+        return state;
+    }
+    function isSourceAligned(state, playlist) {
+        // Guards against a bad sequence mapping: a source's timestamps must agree with the timeline we've already
+        // shown (sessions differ by under a segment, so a few seconds of tolerance is plenty).
+        if (state.segments.length == 0) {
+            return true;
+        }
+        const tail = state.segments[state.segments.length - 1];
+        let closest = null;
+        for (const segment of playlist.segments) {
+            if (segment.seq !== null && Number.isFinite(segment.pdt) && (!closest || Math.abs(segment.seq - tail.seq) < Math.abs(closest.seq - tail.seq))) {
+                closest = segment;
+            }
+        }
+        if (!closest) {
+            return true;
+        }
+        const known = state.segments.find((entry) => entry.seq == closest.seq);
+        const expectedPdt = known ? known.pdt : tail.pdt + (closest.seq - tail.seq) * tail.duration * 1000;
+        return Math.abs(closest.pdt - expectedPdt) <= SeamlessMaxPdtDriftMs;
+    }
+    function buildSeamlessPlaylist(streamInfo, url, mainText, haveAdTags, backupResults) {
+        // Instead of handing the player a different session's playlist during ads (whose numbering and timestamps
+        // don't match what it was playing, which makes it freeze, rebuffer or repeat segments), keep one continuous
+        // playlist per variant. Segments are keyed by their live sequence number and taken from whichever source has
+        // them without ads: the player's own session first, then backups. Returns null to fall back to legacy output.
+        const main = parseM3u8Playlist(mainText);
+        if (main.hasEndList) {
+            delete streamInfo.SeamlessStates[url];
+            return null;
+        }
+        const state = getSeamlessState(streamInfo, url);
+        const now = Date.now();
+        const mainVariantKey = getVariantKey(streamInfo.Urls[url]);
+        const sources = [];
+        if (SimulatedAdsDepth == 0) {
+            sources.push({ name: 'main', playlist: main, variantKey: mainVariantKey });
+        }
+        const sortedBackups = backupResults
+            .filter((result) => result && result.text)
+            .sort((a, b) => (a.variantKey == mainVariantKey ? 0 : 1) - (b.variantKey == mainVariantKey ? 0 : 1));
+        for (const result of sortedBackups) {
+            const playlist = parseM3u8Playlist(result.text);
+            if (result.hasAds && !playlist.hasAds) {
+                continue;// Simulated ad
+            }
+            sources.push({ name: result.playerType, playlist, variantKey: result.variantKey || mainVariantKey });
+        }
+        const candidates = new Map();
+        const usedSources = [];
+        let maxSeq = -Infinity;
+        for (const source of sources) {
+            if (!mapLiveSequences(source.playlist)) {
+                continue;
+            }
+            if (!isSourceAligned(state, source.playlist)) {
+                debugLog('seamless-source-rejected', {
+                    channelName: streamInfo.ChannelName,
+                    source: source.name,
+                    tailSeq: state.segments.length ? state.segments[state.segments.length - 1].seq : null
+                });
+                continue;
+            }
+            usedSources.push(source);
+            for (const segment of source.playlist.segments) {
+                if (segment.seq !== null && !candidates.has(segment.seq)) {
+                    candidates.set(segment.seq, { segment, source });
+                    maxSeq = Math.max(maxSeq, segment.seq);
+                }
+            }
+        }
+        const appendSegment = (seq, isJump) => {
+            const { segment, source } = candidates.get(seq);
+            const previous = state.segments[state.segments.length - 1];
+            const entry = {
+                seq,
+                uri: segment.uri,
+                extinf: segment.extinf,
+                duration: segment.duration,
+                tags: segment.tags,
+                map: segment.map,
+                variantKey: source.variantKey,
+                source: source.name,
+                pdt: Number.isFinite(segment.pdt) ? segment.pdt : now,
+                discontinuity: state.hadLegacyOutput && !previous
+            };
+            if (previous) {
+                // Keep timestamps on one linear timeline; sessions disagree by a fraction of a segment
+                entry.pdt = previous.pdt + (seq - previous.seq) * previous.duration * 1000;
+                entry.discontinuity = isJump || previous.variantKey != entry.variantKey || previous.map != entry.map;
+            }
+            if (isJump) {
+                // The playlist must stay contiguous, so everything before the gap goes
+                for (const removed of state.segments) {
+                    if (removed.discontinuity) {
+                        state.discontinuitySequence++;
+                    }
+                }
+                state.segments = [];
+            }
+            state.segments.push(entry);
+            while (state.segments.length > SeamlessWindowSize) {
+                if (state.segments.shift().discontinuity) {
+                    state.discontinuitySequence++;
+                }
+            }
+        };
+        let appendedCount = 0;
+        if (state.segments.length == 0) {
+            if (candidates.size == 0) {
+                if (haveAdTags) {
+                    state.hadLegacyOutput = true;
+                }
+                return null;
+            }
+            let firstSeq = maxSeq;
+            while (candidates.has(firstSeq - 1) && maxSeq - firstSeq + 1 < SeamlessWindowSize) {
+                firstSeq--;
+            }
+            for (let seq = firstSeq; seq <= maxSeq; seq++) {
+                appendSegment(seq, false);
+                appendedCount++;
+            }
+        } else {
+            let tailSeq = state.segments[state.segments.length - 1].seq;
+            while (true) {
+                if (candidates.has(tailSeq + 1)) {
+                    appendSegment(++tailSeq, false);
+                    appendedCount++;
+                } else if (maxSeq >= tailSeq + SeamlessGapJumpSegments) {
+                    // Nothing will ever fill the gap (ad with no ad-free backup). Rejoin close to the live edge.
+                    let nextSeq = Math.max(tailSeq + 2, maxSeq - 2);
+                    while (!candidates.has(nextSeq)) {
+                        nextSeq++;
+                    }
+                    debugLog('seamless-gap-jump', {
+                        channelName: streamInfo.ChannelName,
+                        fromSeq: tailSeq,
+                        toSeq: nextSeq
+                    });
+                    appendSegment(nextSeq, true);
+                    appendedCount++;
+                    tailSeq = nextSeq;
+                } else {
+                    break;
+                }
+            }
+        }
+        if (appendedCount > 0) {
+            state.lastAdvanceAt = now;
+        }
+        const mainLastUri = main.segments.length ? main.segments[main.segments.length - 1].uri : null;
+        if (mainLastUri && mainLastUri != state.mainLastUri) {
+            state.mainLastUri = mainLastUri;
+            state.mainProgressAt = now;
+        }
+        if (!haveAdTags && state.mainProgressAt - state.lastAdvanceAt > SeamlessStallResetMs) {
+            // The real stream is moving but nothing maps onto our timeline any more. Start over from the main
+            // playlist and reload the player so it accepts the new numbering cleanly.
+            console.log('Seamless playlist stalled; resetting');
+            debugLog('seamless-reset', {
+                channelName: streamInfo.ChannelName,
+                tailSeq: state.segments.length ? state.segments[state.segments.length - 1].seq : null,
+                mainMediaSequence: main.mediaSequence,
+                mainLiveSequence: main.liveSequence
+            });
+            delete streamInfo.SeamlessStates[url];
+            if (LastSeamlessReload < now - 30000) {
+                LastSeamlessReload = now;
+                streamInfo.LastPlayerReload = now;
+                postMessage({
+                    key: 'ReloadPlayer'
+                });
+            }
+            return null;
+        }
+        const segments = state.segments;
+        const tail = segments[segments.length - 1];
+        debugLog('seamless-playlist', {
+            channelName: streamInfo.ChannelName,
+            haveAdTags,
+            appendedCount,
+            firstSeq: segments[0].seq,
+            tailSeq: tail.seq,
+            tailSource: tail.source,
+            sources: usedSources.map((source) => source.name)
+        });
+        if (!haveAdTags && !main.hasAds && state.discontinuitySequence == 0 && main.segments.length > 0 && main.mediaSequence + main.segments.length - 1 == tail.seq) {
+            // Nothing to fix: hand the player Twitch's playlist untouched
+            const isUnchanged = main.segments.every((segment, index) => {
+                const entry = segments.find((item) => item.seq == main.mediaSequence + index);
+                return entry && entry.uri == segment.uri && entry.pdt == segment.pdt && !entry.discontinuity;
+            });
+            if (isUnchanged) {
+                return mainText;
+            }
+        }
+        let prefetchLines = [];
+        for (const source of usedSources) {
+            const sourceSegments = source.playlist.segments;
+            const sourceTail = sourceSegments[sourceSegments.length - 1];
+            if (!source.playlist.hasAds && sourceTail && sourceTail.seq == tail.seq && source.variantKey == tail.variantKey) {
+                prefetchLines = source.playlist.prefetch;
+                break;
+            }
+        }
+        return renderSeamlessPlaylist(state, main, prefetchLines);
+    }
+    function renderSeamlessPlaylist(state, main, prefetchLines) {
+        const segments = state.segments;
+        let targetDuration = main.targetDuration || 0;
+        for (const segment of segments) {
+            targetDuration = Math.max(targetDuration, Math.ceil(segment.duration));
+        }
+        const lines = ['#EXTM3U'];
+        const headerLines = [];
+        for (const line of main.header) {
+            if (line == '#EXTM3U' || isDroppedPlaylistTag(line, main.hasAds)) {
+                continue;
+            }
+            if (line.startsWith('#EXT-X-VERSION:')) {
+                lines.push(line);
+            } else {
+                headerLines.push(line);
+            }
+        }
+        if (lines.length == 1) {
+            lines.push('#EXT-X-VERSION:3');
+        }
+        lines.push('#EXT-X-TARGETDURATION:' + targetDuration);
+        lines.push('#EXT-X-MEDIA-SEQUENCE:' + segments[0].seq);
+        lines.push('#EXT-X-TWITCH-LIVE-SEQUENCE:' + segments[0].seq);
+        if (state.discontinuitySequence > 0) {
+            lines.push('#EXT-X-DISCONTINUITY-SEQUENCE:' + state.discontinuitySequence);
+        }
+        lines.push(...headerLines);
+        let currentMap = null;
+        for (const segment of segments) {
+            if (segment.discontinuity) {
+                lines.push('#EXT-X-DISCONTINUITY');
+            }
+            if (segment.map && segment.map != currentMap) {
+                lines.push(segment.map);
+                currentMap = segment.map;
+            }
+            lines.push(...segment.tags);
+            lines.push('#EXT-X-PROGRAM-DATE-TIME:' + new Date(segment.pdt).toISOString());
+            lines.push(segment.extinf);
+            lines.push(segment.uri);
+        }
+        lines.push(...prefetchLines);
+        return lines.join('\n') + '\n';
+    }
+    function getBackupState(streamInfo, playerType) {
+        if (!streamInfo.BackupStates[playerType]) {
+            streamInfo.BackupStates[playerType] = {
+                Encodings: null,
+                EncodingsAt: 0,
+                EncodingsPromise: null,
+                AdsSince: 0
+            };
+        }
+        return streamInfo.BackupStates[playerType];
+    }
+    function ensureBackupEncodings(streamInfo, playerType, forceFresh, realFetch) {
+        const backupState = getBackupState(streamInfo, playerType);
+        if (!forceFresh && backupState.Encodings && backupState.EncodingsAt > Date.now() - BackupEncodingsMaxAgeMs) {
+            return Promise.resolve(backupState.Encodings);
+        }
+        if (!backupState.EncodingsPromise) {
+            // Shared so concurrent callers (ad polls, warmups, other variants) don't each request a token
+            backupState.EncodingsPromise = (async () => {
+                try {
+                    const accessTokenResponse = await getAccessToken(streamInfo.ChannelName, playerType);
+                    if (accessTokenResponse.status !== 200) {
+                        return null;
+                    }
+                    const accessToken = await accessTokenResponse.json();
+                    const urlInfo = new URL('https://usher.ttvnw.net/api/' + (V2API ? 'v2/' : '') + 'channel/hls/' + streamInfo.ChannelName + '.m3u8' + streamInfo.UsherParams);
+                    urlInfo.searchParams.set('sig', accessToken.data.streamPlaybackAccessToken.signature);
+                    urlInfo.searchParams.set('token', accessToken.data.streamPlaybackAccessToken.value);
+                    const encodingsM3u8Response = await realFetch(urlInfo.href);
+                    if (encodingsM3u8Response.status !== 200) {
+                        return null;
+                    }
+                    backupState.Encodings = await encodingsM3u8Response.text();
+                    backupState.EncodingsAt = Date.now();
+                    backupState.AdsSince = 0;
+                    return backupState.Encodings;
+                } catch (err) {
+                    return null;
+                } finally {
+                    backupState.EncodingsPromise = null;
+                }
+            })();
+        }
+        return backupState.EncodingsPromise;
+    }
+    async function fetchBackupPlaylist(streamInfo, playerType, resolutionInfo, realFetch) {
+        const backupState = getBackupState(streamInfo, playerType);
+        // A session that keeps showing ads gets a new token now and then; a new session may be ad free
+        let forceFresh = backupState.AdsSince > 0 && backupState.AdsSince < Date.now() - BackupSessionRefreshMs;
+        if (forceFresh && backupState.Encodings && backupState.EncodingsAt > Date.now() - BackupEncodingsMaxAgeMs) {
+            // Swap sessions in the background. This poll still uses the current one so the player's playlist
+            // request isn't held up by a token round trip.
+            ensureBackupEncodings(streamInfo, playerType, true, realFetch);
+            forceFresh = false;
+        }
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const encodingsM3u8 = await ensureBackupEncodings(streamInfo, playerType, forceFresh, realFetch);
+            if (!encodingsM3u8) {
+                return null;
+            }
+            const streamM3u8Url = getStreamUrlForResolution(encodingsM3u8, resolutionInfo);
+            if (!streamM3u8Url) {
+                return null;
+            }
+            let response = null;
+            try {
+                response = await realFetch(streamM3u8Url);
+            } catch (err) {}
+            if (response && response.status === 200) {
+                const text = await response.text();
+                const hasAds = hasAdMarkers(text);
+                if (!hasAds) {
+                    backupState.AdsSince = 0;
+                } else if (!backupState.AdsSince) {
+                    backupState.AdsSince = Date.now();
+                }
+                debugLog('backup-playlist', {
+                    channelName: streamInfo.ChannelName,
+                    playerType,
+                    forceFresh,
+                    streamM3u8Url: summarizeUrl(streamM3u8Url),
+                    hasAdMarkers: hasAds,
+                    summary: getAdMarkerSummary(text)
+                });
+                return {
+                    playerType,
+                    text,
+                    hasAds,
+                    variantKey: getVariantKeyForUrl(encodingsM3u8, streamM3u8Url)
+                };
+            }
+            // Expired token or the stream restarted. Try once more with a fresh session.
+            forceFresh = true;
+        }
+        return null;
+    }
+    async function getBackupPlaylists(streamInfo, resolutionInfo, realFetch) {
+        // Returns every backup playlist we could get, best first. Sessions we already hold a token for are
+        // queried in parallel (one request each); new tokens are only requested if none of those are ad free.
+        const playerTypes = BackupPlayerTypes.map((playerType) => playerType.replace('-CACHED', ''));
+        const preferred = streamInfo.PreferredBackupType;
+        const orderedTypes = preferred && playerTypes.includes(preferred) ? [preferred].concat(playerTypes.filter((playerType) => playerType != preferred)) : playerTypes;
+        const fetchAll = async (types) => {
+            // All requests start together, but we only wait until the best ad-free one is in. Slower ones
+            // (e.g. a token refresh) finish in the background and still update their session state.
+            const promises = types.map((playerType) => fetchBackupPlaylist(streamInfo, playerType, resolutionInfo, realFetch).catch(() => null));
+            const results = [];
+            for (const promise of promises) {
+                const result = await promise;
+                if (!result) {
+                    continue;
+                }
+                if (SimulatedAdsDepth > 0 && playerTypes.indexOf(result.playerType) < SimulatedAdsDepth - 1) {
+                    result.hasAds = true;
+                }
+                results.push(result);
+                if (!result.hasAds) {
+                    break;
+                }
+            }
+            return results;
+        };
+        const warmTypes = orderedTypes.filter((playerType) => getBackupState(streamInfo, playerType).Encodings);
+        let results = warmTypes.length > 0 ? await fetchAll(warmTypes) : [];
+        if (!results.some((result) => !result.hasAds)) {
+            const coldTypes = orderedTypes.filter((playerType) => !warmTypes.includes(playerType));
+            if (coldTypes.length > 0) {
+                results = results.concat(await fetchAll(coldTypes));
+            }
+        }
+        results.sort((a, b) => orderedTypes.indexOf(a.playerType) - orderedTypes.indexOf(b.playerType));
+        const adFreeResult = results.find((result) => !result.hasAds);
+        if (adFreeResult) {
+            streamInfo.PreferredBackupType = adFreeResult.playerType;
+        }
+        return results;
+    }
+    function warmBackupPlaylist(streamInfo, resolutionInfo, realFetch) {
+        // Keeps backup sessions (tokens + a polled playlist) ready ahead of time so the first ad poll costs one
+        // request instead of three. Polling a backup also lets its own preroll play out in the background.
+        const now = Date.now();
+        if (!BackupWarmIntervalMs || streamInfo.CreatedAt > now - BackupWarmStartDelayMs || streamInfo.BackupWarmAt > now - BackupWarmIntervalMs) {
+            return;
+        }
+        streamInfo.BackupWarmAt = now;
+        const playerTypes = BackupPlayerTypes.map((playerType) => playerType.replace('-CACHED', ''));
+        if (streamInfo.BackupWarmIndex == 0) {
+            // First warmup gets a session for every type, so whichever one is ad free when an ad starts is a
+            // single request away. After that, one type per interval keeps them all polled and their tokens fresh.
+            streamInfo.BackupWarmIndex = playerTypes.length;
+            for (const playerType of playerTypes) {
+                fetchBackupPlaylist(streamInfo, playerType, resolutionInfo, realFetch).catch(() => {});
+            }
+            return;
+        }
+        const playerType = playerTypes[streamInfo.BackupWarmIndex++ % playerTypes.length];
+        fetchBackupPlaylist(streamInfo, playerType, resolutionInfo, realFetch).catch(() => {});
+    }
+    async function processM3U8(url, textStr, realFetch, backupPromise) {
         const streamInfo = StreamInfosByUrl[url];
         if (!streamInfo) {
             return textStr;
@@ -646,8 +1244,12 @@
         if (HasTriggeredPlayerReload) {
             HasTriggeredPlayerReload = false;
             streamInfo.LastPlayerReload = Date.now();
+            streamInfo.SeamlessStates = {};
         }
         const haveAdTags = hasAdMarkers(textStr) || SimulatedAdsDepth > 0;
+        const currentResolution = streamInfo.Urls[url];
+        let backupResults = [];
+        let isHevc = false;
         if (haveAdTags) {
             streamInfo.IsMidroll = textStr.toLowerCase().includes('midroll');
             debugLog('ad-playlist', {
@@ -681,7 +1283,6 @@
                     }
                 }
             }
-            const currentResolution = streamInfo.Urls[url];
             if (!currentResolution) {
                 console.log('Ads will leak due to missing resolution info for ' + url);
                 debugLog('missing-resolution-info', {
@@ -691,7 +1292,7 @@
                 });
                 return textStr;
             }
-            const isHevc = currentResolution.Codecs.startsWith('hev') || currentResolution.Codecs.startsWith('hvc');
+            isHevc = currentResolution.Codecs.startsWith('hev') || currentResolution.Codecs.startsWith('hvc');
             if (((isHevc && !SkipPlayerReloadOnHevc) || AlwaysReloadPlayerOnAd) && streamInfo.ModifiedM3U8 && !streamInfo.IsUsingModifiedM3U8) {
                 streamInfo.IsUsingModifiedM3U8 = true;
                 streamInfo.LastPlayerReload = Date.now();
@@ -699,138 +1300,81 @@
                     key: 'ReloadPlayer'
                 });
             }
-            let backupPlayerType = null;
-            let backupM3u8 = null;
-            let fallbackM3u8 = null;
-            let startIndex = 0;
-            let isDoingMinimalRequests = false;
-            if (streamInfo.LastPlayerReload > Date.now() - PlayerReloadMinimalRequestsTime) {
-                // When doing player reload there are a lot of requests which causes the backup stream to load in slow. Briefly prefer using a single version to prevent long delays
-                startIndex = PlayerReloadMinimalRequestsPlayerIndex;
-                isDoingMinimalRequests = true;
-            }
-            for (let playerTypeIndex = startIndex; !backupM3u8 && playerTypeIndex < BackupPlayerTypes.length; playerTypeIndex++) {
-                const playerType = BackupPlayerTypes[playerTypeIndex];
-                const realPlayerType = playerType.replace('-CACHED', '');
-                const isFullyCachedPlayerType = playerType != realPlayerType;
-                for (let i = 0; i < 2; i++) {
-                    // This caches the m3u8 if it doesn't have ads. If the already existing cache has ads it fetches a new version (second loop)
-                    let isFreshM3u8 = false;
-                    let encodingsM3u8 = streamInfo.BackupEncodingsM3U8Cache[playerType];
-                    if (!encodingsM3u8) {
-                        isFreshM3u8 = true;
-                        try {
-                            const accessTokenResponse = await getAccessToken(streamInfo.ChannelName, realPlayerType);
-                            if (accessTokenResponse.status === 200) {
-                                const accessToken = await accessTokenResponse.json();
-                                const urlInfo = new URL('https://usher.ttvnw.net/api/' + (V2API ? 'v2/' : '') + 'channel/hls/' + streamInfo.ChannelName + '.m3u8' + streamInfo.UsherParams);
-                                urlInfo.searchParams.set('sig', accessToken.data.streamPlaybackAccessToken.signature);
-                                urlInfo.searchParams.set('token', accessToken.data.streamPlaybackAccessToken.value);
-                                const encodingsM3u8Response = await realFetch(urlInfo.href);
-                                if (encodingsM3u8Response.status === 200) {
-                                    encodingsM3u8 = streamInfo.BackupEncodingsM3U8Cache[playerType] = await encodingsM3u8Response.text();
-                                }
-                            }
-                        } catch (err) {}
-                    }
-                    if (encodingsM3u8) {
-                        try {
-                            const streamM3u8Url = getStreamUrlForResolution(encodingsM3u8, currentResolution);
-                            const streamM3u8Response = await realFetch(streamM3u8Url);
-                            if (streamM3u8Response.status == 200) {
-                                const m3u8Text = await streamM3u8Response.text();
-                                if (m3u8Text) {
-                                    const backupHasAdMarkers = hasAdMarkers(m3u8Text);
-                                    debugLog('backup-playlist', {
-                                        channelName: streamInfo.ChannelName,
-                                        playerType,
-                                        isFreshM3u8,
-                                        isFullyCachedPlayerType,
-                                        isDoingMinimalRequests,
-                                        streamM3u8Url: summarizeUrl(streamM3u8Url),
-                                        hasAdMarkers: backupHasAdMarkers,
-                                        summary: getAdMarkerSummary(m3u8Text)
-                                    });
-                                    if (playerType == FallbackPlayerType) {
-                                        fallbackM3u8 = m3u8Text;
-                                    }
-                                    if ((!backupHasAdMarkers && (SimulatedAdsDepth == 0 || playerTypeIndex >= SimulatedAdsDepth - 1)) || (!fallbackM3u8 && playerTypeIndex >= BackupPlayerTypes.length - 1)) {
-                                        backupPlayerType = playerType;
-                                        backupM3u8 = m3u8Text;
-                                        break;
-                                    }
-                                    if (isFullyCachedPlayerType) {
-                                        break;
-                                    }
-                                    if (isDoingMinimalRequests) {
-                                        backupPlayerType = playerType;
-                                        backupM3u8 = m3u8Text;
-                                        break;
-                                    }
-                                }
-                            }
-                        } catch (err) {}
-                    }
-                    streamInfo.BackupEncodingsM3U8Cache[playerType] = null;
-                    if (isFreshM3u8) {
-                        break;
-                    }
-                }
-            }
-            if (!backupM3u8 && fallbackM3u8) {
-                backupPlayerType = FallbackPlayerType;
-                backupM3u8 = fallbackM3u8;
-            }
-            if (backupM3u8) {
-                textStr = backupM3u8;
-                debugLog('backup-selected', {
-                    channelName: streamInfo.ChannelName,
-                    playerType: backupPlayerType,
-                    isMidroll: streamInfo.IsMidroll,
-                    summary: getAdMarkerSummary(backupM3u8)
-                });
-                if (streamInfo.ActiveBackupPlayerType != backupPlayerType) {
-                    streamInfo.ActiveBackupPlayerType = backupPlayerType;
+            backupResults = await (backupPromise || getBackupPlaylists(streamInfo, currentResolution, realFetch));
+            const adFreeResult = backupResults.find((result) => !result.hasAds);
+            const backupPlayerType = adFreeResult ? adFreeResult.playerType : null;
+            streamInfo.IsStrippingAdSegments = !adFreeResult;
+            if (streamInfo.ActiveBackupPlayerType != backupPlayerType) {
+                streamInfo.ActiveBackupPlayerType = backupPlayerType;
+                if (backupPlayerType) {
                     console.log(`Blocking${(streamInfo.IsMidroll ? ' midroll ' : ' ')}ads (${backupPlayerType})`);
                 }
             }
-            // TODO: Improve hevc stripping. It should always strip when there is a codec mismatch (both ways)
-            const stripHevc = isHevc && streamInfo.ModifiedM3U8;
-            if (IsAdStrippingEnabled || stripHevc) {
-                const strippedBefore = streamInfo.NumStrippedAdSegments;
-                textStr = stripAdSegments(textStr, stripHevc, streamInfo);
-                debugLog('strip-result', {
+        } else {
+            if (streamInfo.IsShowingAd) {
+                console.log('Finished blocking ads');
+                debugLog('ad-finished', {
                     channelName: streamInfo.ChannelName,
-                    stripHevc,
-                    isStrippingAdSegments: streamInfo.IsStrippingAdSegments,
-                    newlyStrippedSegments: streamInfo.NumStrippedAdSegments - strippedBefore,
-                    totalStrippedSegments: streamInfo.NumStrippedAdSegments,
-                    outputSummary: getAdMarkerSummary(textStr)
+                    activeBackupPlayerType: streamInfo.ActiveBackupPlayerType,
+                    totalStrippedSegments: streamInfo.NumStrippedAdSegments
                 });
+                streamInfo.IsShowingAd = false;
+                streamInfo.IsStrippingAdSegments = false;
+                streamInfo.NumStrippedAdSegments = 0;
+                streamInfo.ActiveBackupPlayerType = null;
+                if (streamInfo.IsUsingModifiedM3U8 || ReloadPlayerAfterAd) {
+                    streamInfo.IsUsingModifiedM3U8 = false;
+                    streamInfo.LastPlayerReload = Date.now();
+                    debugLog('post-ad-recovery', { action: 'reload' });
+                    postMessage({
+                        key: 'ReloadPlayer'
+                    });
+                } else if (PauseResumePlayerAfterAd) {
+                    debugLog('post-ad-recovery', { action: 'pause-resume' });
+                    postMessage({
+                        key: 'PauseResumePlayer'
+                    });
+                }
             }
-        } else if (streamInfo.IsShowingAd) {
-            console.log('Finished blocking ads');
-            debugLog('ad-finished', {
-                channelName: streamInfo.ChannelName,
-                activeBackupPlayerType: streamInfo.ActiveBackupPlayerType,
-                totalStrippedSegments: streamInfo.NumStrippedAdSegments
-            });
-            streamInfo.IsShowingAd = false;
-            streamInfo.IsStrippingAdSegments = false;
-            streamInfo.NumStrippedAdSegments = 0;
-            streamInfo.ActiveBackupPlayerType = null;
-            if (streamInfo.IsUsingModifiedM3U8 || ReloadPlayerAfterAd) {
-                streamInfo.IsUsingModifiedM3U8 = false;
-                streamInfo.LastPlayerReload = Date.now();
-                debugLog('post-ad-recovery', { action: 'reload' });
-                postMessage({
-                    key: 'ReloadPlayer'
-                });
-            } else if (PauseResumePlayerAfterAd) {
-                debugLog('post-ad-recovery', { action: 'pause-resume' });
-                postMessage({
-                    key: 'PauseResumePlayer'
-                });
+            if (backupPromise) {
+                // Started while the ad was still running; it can still bridge the hand back to the main stream
+                backupResults = await backupPromise;
+            }
+            if (currentResolution) {
+                warmBackupPlaylist(streamInfo, currentResolution, realFetch);
+            }
+        }
+        let outputText = SeamlessPlaylists ? buildSeamlessPlaylist(streamInfo, url, textStr, haveAdTags, backupResults) : null;
+        if (outputText === null) {
+            outputText = textStr;
+            if (haveAdTags) {
+                // Legacy behaviour: swap in a backup playlist and blank out any remaining ad segments
+                const backupResult = backupResults.find((result) => !result.hasAds)
+                    || backupResults.find((result) => result.playerType == FallbackPlayerType)
+                    || backupResults[0];
+                if (backupResult) {
+                    outputText = backupResult.text;
+                    debugLog('backup-selected', {
+                        channelName: streamInfo.ChannelName,
+                        playerType: backupResult.playerType,
+                        isMidroll: streamInfo.IsMidroll,
+                        summary: getAdMarkerSummary(backupResult.text)
+                    });
+                }
+                // TODO: Improve hevc stripping. It should always strip when there is a codec mismatch (both ways)
+                const stripHevc = isHevc && streamInfo.ModifiedM3U8;
+                if (IsAdStrippingEnabled || stripHevc) {
+                    const strippedBefore = streamInfo.NumStrippedAdSegments;
+                    outputText = stripAdSegments(outputText, stripHevc, streamInfo);
+                    debugLog('strip-result', {
+                        channelName: streamInfo.ChannelName,
+                        stripHevc,
+                        isStrippingAdSegments: streamInfo.IsStrippingAdSegments,
+                        newlyStrippedSegments: streamInfo.NumStrippedAdSegments - strippedBefore,
+                        totalStrippedSegments: streamInfo.NumStrippedAdSegments,
+                        outputSummary: getAdMarkerSummary(outputText)
+                    });
+                }
             }
         }
         postMessage({
@@ -840,7 +1384,7 @@
             isStrippingAdSegments: streamInfo.IsStrippingAdSegments,
             numStrippedAdSegments: streamInfo.NumStrippedAdSegments
         });
-        return textStr;
+        return outputText;
     }
     function parseAttributes(str) {
         return Object.fromEntries(
@@ -1198,7 +1742,7 @@
                         postTwitchWorkerMessage('UpdateClientIntegrityHeader', ClientIntegrityHeader = init.headers['Client-Integrity']);
                     }
                     if (typeof init.headers['Authorization'] === 'string' && init.headers['Authorization'] !== AuthorizationHeader) {
-                        postTwitchWorkerMessage('UpdateAuthorizationHeader', AuthorizationHeader);
+                        postTwitchWorkerMessage('UpdateAuthorizationHeader', AuthorizationHeader = init.headers['Authorization']);
                     }
                     // Get rid of mini player above chat - TODO: Reject this locally instead of having server reject it
                     if (init && typeof init.body === 'string' && init.body.includes('PlaybackAccessToken') && init.body.includes('picture-by-picture')) {
